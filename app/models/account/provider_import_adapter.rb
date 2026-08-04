@@ -782,6 +782,10 @@ class Account::ProviderImportAdapter
         OR (transactions.extra -> 'redbark' ->> 'pending')::boolean = true
       SQL
       .order(date: :desc) # Prefer most recent pending transaction
+      .limit(2)
+      .to_a
+
+    return nil if candidates.size != 1
 
     candidates.first
   end
