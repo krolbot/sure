@@ -118,4 +118,105 @@ class Transactions::BulkUpdatesControllerTest < ActionDispatch::IntegrationTest
     transaction_entry.reload
     assert_equal [ new_tag.id ], transaction_entry.transaction.tag_ids
   end
+
+  test "member cannot bulk update an unshared account" do
+    member = users(:family_member)
+    entry = create_transaction_entry(accounts(:investment), name: "Private entry")
+    sign_in member
+
+    post transactions_bulk_update_url, params: {
+      bulk_update: { entry_ids: [ entry.id ], notes: "must not leak" }
+    }
+
+    assert_redirected_to transactions_url
+    assert_equal I18n.t("transactions.bulk_updates.permission_error"), flash[:alert]
+    assert_nil entry.reload.notes
+  end
+
+  test "mixed authorized and unauthorized bulk update is all or nothing" do
+    member = users(:family_member)
+    writable_entry = create_transaction_entry(accounts(:depository), name: "Writable entry")
+    private_entry = create_transaction_entry(accounts(:investment), name: "Private entry")
+    sign_in member
+
+    post transactions_bulk_update_url, params: {
+      bulk_update: {
+        entry_ids: [ writable_entry.id, private_entry.id ],
+        notes: "must apply nowhere"
+      }
+    }
+
+    assert_equal I18n.t("transactions.bulk_updates.permission_error"), flash[:alert]
+    assert_nil writable_entry.reload.notes
+    assert_nil private_entry.reload.notes
+  end
+
+  test "read_write share can annotate normalized UUID ids" do
+    member = users(:family_member)
+    account = accounts(:investment)
+    account.share_with!(member, permission: "read_write")
+    entry = create_transaction_entry(account, name: "Annotatable entry")
+    sign_in member
+
+    post transactions_bulk_update_url, params: {
+      bulk_update: {
+        entry_ids: [ "", entry.id, entry.id ],
+        notes: "annotation",
+        category_id: Category.second.id
+      }
+    }
+
+    assert_equal "1 transactions updated", flash[:notice]
+    assert_equal "annotation", entry.reload.notes
+    assert_equal Category.second, entry.transaction.reload.category
+  end
+
+  test "read_write share cannot combine annotations with structural changes" do
+    member = users(:family_member)
+    account = accounts(:investment)
+    account.share_with!(member, permission: "read_write")
+    entry = create_transaction_entry(account, name: "Original name")
+    original_date = entry.date
+    sign_in member
+
+    post transactions_bulk_update_url, params: {
+      bulk_update: {
+        entry_ids: [ entry.id ],
+        notes: "must not partially apply",
+        date: 2.days.ago.to_date,
+        name: "Blocked name"
+      }
+    }
+
+    assert_equal I18n.t("transactions.bulk_updates.permission_error"), flash[:alert]
+    assert_nil entry.reload.notes
+    assert_equal original_date, entry.date
+    assert_equal "Original name", entry.name
+  end
+
+  test "full control share can bulk update structural fields" do
+    member = users(:family_member)
+    entry = create_transaction_entry(accounts(:depository), name: "Original name")
+    sign_in member
+
+    post transactions_bulk_update_url, params: {
+      bulk_update: { entry_ids: [ entry.id ], name: "Updated name", date: 2.days.ago.to_date }
+    }
+
+    assert_equal "1 transactions updated", flash[:notice]
+    assert_equal "Updated name", entry.reload.name
+    assert_equal 2.days.ago.to_date, entry.date
+  end
+
+  private
+
+    def create_transaction_entry(account, name:)
+      account.entries.create!(
+        name: name,
+        date: Date.current,
+        amount: -20,
+        currency: account.currency,
+        entryable: Transaction.new(kind: "standard")
+      )
+    end
 end

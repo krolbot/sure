@@ -80,6 +80,19 @@ class Account < ApplicationRecord
       .distinct
   }
 
+  # Accounts where a user may change non-structural annotations without
+  # receiving full account control.
+  scope :annotatable_by, ->(user) {
+    left_joins(:account_shares)
+      .where(
+        "accounts.owner_id = :uid OR " \
+        "(account_shares.user_id = :uid AND account_shares.permission IN (:permissions))",
+        uid: user.id,
+        permissions: %w[full_control read_write]
+      )
+      .distinct
+  }
+
   # Accounts that count in a user's financial calculations
   scope :included_in_finances_for, ->(user) {
     left_joins(:account_shares)

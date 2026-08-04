@@ -36,6 +36,7 @@ RSpec.describe 'API V1 Trades', type: :request do
   let(:account) do
     Account.create!(
       family: family,
+      owner: user,
       name: 'Investment Account',
       balance: 50_000,
       currency: 'USD',
@@ -81,6 +82,7 @@ RSpec.describe 'API V1 Trades', type: :request do
     get 'List trades' do
       tags 'Trades'
       security [ { apiKeyAuth: [] } ]
+      description 'Returns trades for accounts accessible to the authenticated user, excluding accounts pending deletion.'
       produces 'application/json'
       parameter name: :page, in: :query, type: :integer, required: false,
                 description: 'Page number (default: 1)'
@@ -270,8 +272,9 @@ RSpec.describe 'API V1 Trades', type: :request do
         run_test!
       end
 
-      response '404', 'account not found' do
+      response '404', 'account not found or not writable' do
         schema '$ref' => '#/components/schemas/ErrorResponse'
+        description 'Returned when either the trade account or linked transfer account does not exist, or the authenticated user lacks full-control write access.'
 
         let(:body) do
           {
@@ -491,8 +494,9 @@ RSpec.describe 'API V1 Trades', type: :request do
         run_test!
       end
 
-      response '404', 'trade not found' do
+      response '404', 'trade not found or not accessible' do
         schema '$ref' => '#/components/schemas/ErrorResponse'
+        description 'Returned when the trade does not exist or belongs to an account the authenticated user cannot access.'
 
         let(:id) { SecureRandom.uuid }
 
@@ -557,6 +561,7 @@ RSpec.describe 'API V1 Trades', type: :request do
       response '403', 'forbidden - api key missing read_write scope' do
         schema '$ref' => '#/components/schemas/ErrorResponse'
 
+        let(:id) { trade.id }
         let(:read_only_api_key) do
           key = ApiKey.generate_secure_key
           ApiKey.create!(
@@ -572,8 +577,9 @@ RSpec.describe 'API V1 Trades', type: :request do
         run_test!
       end
 
-      response '404', 'trade not found' do
+      response '404', 'trade not found or not writable' do
         schema '$ref' => '#/components/schemas/ErrorResponse'
+        description 'Returned when the trade does not exist, when a structural update targets an account without full-control access, or when a notes-only update targets an account without read-write access.'
 
         let(:id) { SecureRandom.uuid }
 
@@ -606,6 +612,7 @@ RSpec.describe 'API V1 Trades', type: :request do
       response '403', 'forbidden - api key missing read_write scope' do
         schema '$ref' => '#/components/schemas/ErrorResponse'
 
+        let(:id) { trade.id }
         let(:read_only_api_key) do
           key = ApiKey.generate_secure_key
           ApiKey.create!(
@@ -621,8 +628,9 @@ RSpec.describe 'API V1 Trades', type: :request do
         run_test!
       end
 
-      response '404', 'trade not found' do
+      response '404', 'trade not found or not writable' do
         schema '$ref' => '#/components/schemas/ErrorResponse'
+        description 'Returned when the trade does not exist or belongs to an account the authenticated user cannot write to with full control.'
 
         let(:id) { SecureRandom.uuid }
 
