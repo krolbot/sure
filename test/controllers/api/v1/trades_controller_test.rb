@@ -815,7 +815,150 @@ class Api::V1::TradesControllerTest < ActionDispatch::IntegrationTest
     assert trade_data.key?("notes")
   end
 
+  test "member index and show expose only accessible account trades" do
+    member = users(:family_member)
+    member_key = api_key_for(member)
+    trade = entries(:trade).entryable
+
+    get api_v1_trades_url, headers: api_headers(member_key)
+    assert_response :success
+    assert_not_includes JSON.parse(response.body).fetch("trades").pluck("id"), trade.id
+
+    get api_v1_trade_url(trade), headers: api_headers(member_key)
+    assert_response :not_found
+    hidden_response = response.body
+
+    get api_v1_trade_url(SecureRandom.uuid), headers: api_headers(member_key)
+    assert_response :not_found
+    assert_equal hidden_response, response.body
+
+    @investment_account.share_with!(member, permission: "read_only")
+    get api_v1_trade_url(trade), headers: api_headers(member_key)
+    assert_response :success
+    assert_equal trade.id, JSON.parse(response.body)["id"]
+  end
+
+  test "member create requires full control account share" do
+    member = users(:family_member)
+    member_key = api_key_for(member)
+    security = Security.create!(ticker: "AUTH", name: "Auth Security", country_code: "US")
+
+    assert_no_difference "Trade.count" do
+      post api_v1_trades_url,
+        params: { trade: trade_create_params(security) },
+        headers: api_headers(member_key)
+    end
+    assert_response :not_found
+
+    @investment_account.share_with!(member, permission: "read_write")
+    assert_no_difference "Trade.count" do
+      post api_v1_trades_url,
+        params: { trade: trade_create_params(security) },
+        headers: api_headers(member_key)
+    end
+    assert_response :not_found
+
+    @investment_account.account_shares.find_by!(user: member).update!(permission: "full_control")
+    assert_difference "Trade.count", 1 do
+      post api_v1_trades_url,
+        params: { trade: trade_create_params(security) },
+        headers: api_headers(member_key)
+    end
+    assert_response :created
+  end
+
+  test "member structural update and destroy require full control without leaking trade existence" do
+    member = users(:family_member)
+    member_key = api_key_for(member)
+    trade = entries(:trade).entryable
+    entry = trade.entry
+    original_date = entry.date
+    @investment_account.share_with!(member, permission: "read_write")
+
+    put api_v1_trade_url(trade),
+      params: { trade: { date: 2.days.ago.to_date } },
+      headers: api_headers(member_key)
+    assert_response :not_found
+    assert_equal original_date, entry.reload.date
+
+    assert_no_difference "Trade.count" do
+      delete api_v1_trade_url(trade), headers: api_headers(member_key)
+    end
+    assert_response :not_found
+    assert Trade.exists?(trade.id)
+  end
+
+  test "read_write share can annotate a trade but cannot change structural fields" do
+    member = users(:family_member)
+    member_key = api_key_for(member)
+    trade = entries(:trade).entryable
+    entry = trade.entry
+    original_date = entry.date
+    @investment_account.share_with!(member, permission: "read_write")
+
+    put api_v1_trade_url(trade),
+      params: { trade: { notes: "member annotation" } },
+      headers: api_headers(member_key)
+
+    assert_response :success
+    assert_equal "member annotation", entry.reload.notes
+
+    put api_v1_trade_url(trade),
+      params: { trade: { notes: "must not partially apply", date: 2.days.ago.to_date } },
+      headers: api_headers(member_key)
+
+    assert_response :not_found
+    assert_equal "member annotation", entry.reload.notes
+    assert_equal original_date, entry.date
+  end
+
+  test "linked transfer trade requires write access to reciprocal account" do
+    member = users(:family_member)
+    member_key = api_key_for(member)
+    @investment_account.share_with!(member, permission: "full_control")
+    reciprocal = accounts(:credit_card) # read_only fixture share
+
+    assert_no_difference [ "Transfer.count", "Entry.count" ] do
+      post api_v1_trades_url,
+        params: {
+          trade: {
+            account_id: @investment_account.id,
+            transfer_account_id: reciprocal.id,
+            type: "withdrawal",
+            date: Date.current,
+            amount: 50,
+            currency: "USD"
+          }
+        },
+        headers: api_headers(member_key)
+    end
+
+    assert_response :not_found
+  end
+
   private
+
+    def api_key_for(user)
+      ApiKey.create!(
+        user: user,
+        name: "Member auth key",
+        key: ApiKey.generate_secure_key,
+        scopes: %w[read_write],
+        source: "web"
+      ).tap { |key| Redis.new.del("api_rate_limit:#{key.id}") }
+    end
+
+    def trade_create_params(security)
+      {
+        account_id: @investment_account.id,
+        type: "buy",
+        date: Date.current,
+        qty: 1,
+        price: 10,
+        currency: "USD",
+        security_id: security.id
+      }
+    end
 
     def read_write_api_key
       @read_write_api_key ||= ApiKey.create!(
