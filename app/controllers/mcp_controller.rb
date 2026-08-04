@@ -70,7 +70,7 @@ class McpController < ApplicationController
     end
 
     def handle_tools_list
-      tools = Assistant.function_classes.map do |fn_class|
+      tools = Assistant.mcp_function_classes.map do |fn_class|
         fn_instance = fn_class.new(mcp_user)
         {
           name: fn_instance.name,
@@ -86,7 +86,7 @@ class McpController < ApplicationController
       name = params&.dig("name")
       arguments = params&.dig("arguments") || {}
 
-      fn_class = Assistant.function_classes.find { |fc| fc.name == name }
+      fn_class = Assistant.mcp_function_classes.find { |fc| fc.name == name }
 
       unless fn_class
         render_jsonrpc_error(request_id, -32602, "Unknown tool: #{name}")

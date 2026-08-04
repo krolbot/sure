@@ -42,6 +42,25 @@ module Assistant
       ]
     end
 
+    def mcp_function_classes
+      function_classes + [
+        Function::GetTransfers,
+        Function::GetGoals,
+        Function::CreateAccount,
+        Function::UpdateAccount,
+        Function::DeleteAccount,
+        Function::DeleteTransaction,
+        Function::CreateTransfer,
+        Function::UpdateTransfer,
+        Function::DeleteTransfer,
+        Function::UpdateGoal,
+        Function::DeleteGoal,
+        Function::DeleteTag,
+        Function::DeleteCategory,
+        Function::UpdateBudget
+      ]
+    end
+
     private
 
       def implementation_for(chat)
