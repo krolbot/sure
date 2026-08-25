@@ -150,10 +150,9 @@ class Holding::ForwardCalculatorTest < ActiveSupport::TestCase
     Security::Price.create!(security: eur_security, date: 1.day.ago.to_date,  price: 100)
     Security::Price.create!(security: eur_security, date: Date.current,        price: 100)
 
-    ExchangeRate.create!(from_currency: "EUR", to_currency: "USD", date: 2.days.ago.to_date, rate: 1.08)
-    # No EUR→USD rate exists for 1.day.ago
-
-    create_trade(eur_security, qty: 5, date: 2.days.ago.to_date, price: 50, account: @account, currency: "EUR")
+    # The first buy is domestic and has a known cost basis. The second is EUR,
+    # with no EUR→USD rate anywhere in the five-day lookback window.
+    create_trade(eur_security, qty: 5, date: 2.days.ago.to_date, price: 50, account: @account, currency: "USD")
     create_trade(eur_security, qty: 5, date: 1.day.ago.to_date, price: 55, account: @account, currency: "EUR")
 
     holdings = Holding::ForwardCalculator.new(@account).calculate
