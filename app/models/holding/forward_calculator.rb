@@ -6,8 +6,10 @@ class Holding::ForwardCalculator
     @security_ids = security_ids
     # Track cost basis per security: { security_id => { total_cost: BigDecimal, total_qty: BigDecimal } }
     @cost_basis_tracker = Hash.new { |h, k| h[k] = { total_cost: BigDecimal("0"), total_qty: BigDecimal("0") } }
-    # Securities whose cost basis cannot be computed due to a missing FX rate on a trade date
+    # Securities whose cost basis cannot be computed due to a missing FX rate.
     @cost_basis_invalid = {}
+    # Securities whose position has taken in a transfer at an unknown cost.
+    @transferred_security_ids = Set.new
   end
 
   def calculate
@@ -74,7 +76,8 @@ class Holding::ForwardCalculator
           price: price.price,
           currency: price.currency,
           amount: qty * price.price,
-          cost_basis: cost_basis_for(security_id, price.currency)
+          cost_basis: cost_basis_for(security_id, price.currency),
+          cost_basis_unknown: @transferred_security_ids.include?(security_id)
         )
       end.compact
     end
@@ -87,7 +90,14 @@ class Holding::ForwardCalculator
         next unless trade.qty > 0 # Only track buys
 
         security_id = trade.security_id
-        next if @cost_basis_invalid[security_id] # already invalidated by a prior missing rate
+        # A transfer contributes no known acquisition cost and invalidates the
+        # whole position even if an earlier FX lookup already failed.
+        if trade.investment_activity_label == Trade::TRANSFER_LABEL
+          @transferred_security_ids << security_id
+          next
+        end
+
+        next if @cost_basis_invalid[security_id]
 
         tracker = @cost_basis_tracker[security_id]
 
@@ -110,7 +120,7 @@ class Holding::ForwardCalculator
     # Returns the current cost basis for a security, or nil if no buys recorded
     # or if any buy had an unresolvable FX rate.
     def cost_basis_for(security_id, currency)
-      return nil if @cost_basis_invalid[security_id]
+      return nil if @cost_basis_invalid[security_id] || @transferred_security_ids.include?(security_id)
 
       tracker = @cost_basis_tracker[security_id]
       return nil if tracker[:total_qty].zero?

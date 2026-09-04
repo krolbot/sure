@@ -161,7 +161,7 @@ At the time of writing, `tools/list` includes:
 | `import_bank_statement` | Import bank statement data |
 | `search_family_files` | Search documents uploaded through the import flow. Note this is the vector-store document index, not the Statement Vault — statements archived via `upload_account_statement` are not searchable through it |
 
-`get_accounts`, `get_goals`, `get_tags`, `get_transfers`, and the other list tools return the stable IDs required by follow-up actions. `get_accounts` includes each account's current type, subtype, permission, and `goal_funding` status. Goal create/update calls use one complete `funding_accounts` list; every item identifies an account ID and chooses either `whole_account` or `fixed_amount`. Call `get_account_types` before `create_account` to discover valid subtype values. In `get_accounts`, `writable` means the account can be used for account-level and balance-affecting write tools; `transaction_editing.annotations` separately reports whether the user can update transaction notes, categories, merchants, or tags on that account. Creation tools that accept an `external_id` require the caller to reuse the same key when retrying an operation.
+`get_accounts`, `get_goals`, `get_tags`, `get_transfers`, and the other list tools return the stable IDs required by follow-up actions. `get_accounts` includes each account's current type, subtype, permission, and `goal_funding` status. Goal create/update calls use one complete `funding_accounts` list; every item identifies an account ID and chooses either `whole_account` or `fixed_amount`. Call `get_account_types` before `create_account` or a subtype-changing `update_account` call to discover valid subtype values. In `get_accounts`, `writable` means the account can be used for account-level and balance-affecting write tools; `transaction_editing.annotations` separately reports whether the user can update transaction notes, categories, merchants, or tags on that account. Creation tools that accept an `external_id` require the caller to reuse the same key when retrying an operation.
 
 Destructive MCP-only tools are not automatically exposed to Sure's built-in
 assistant.
@@ -183,6 +183,20 @@ permissions enforced in the web UI.
 | `record_valuation` | Record an account's value on a date, with a required source citation |
 | `get_valuations` | List recorded valuations newest first, including the citation stored in each entry's notes; the read pair for `record_valuation` |
 | `get_insights` | Read the proactive insights feed (spending anomalies, cash-flow warnings, subscription audits and more) without marking anything read |
+| `get_bills` | List bills, subscriptions and other recurring obligations with each one's current payment state |
+| `get_bill_details` | One bill's full configuration, open occurrences, payment history, price-change history and cost analytics |
+| `get_paycheck_plan` | Income plan sliced into pay periods: what is due before the next payday, what stays reserved for later bills, what is safe to spend |
+| `get_bill_audit` | Deterministic bills review: possible duplicates, price changes, trials about to convert, upcoming renewals, long-overdue bills and undeclared recurring patterns |
+| `create_bill` | Create a bill, subscription, installment plan or income schedule |
+| `update_bill` | Update one bill's configuration; amount changes apply from today forward |
+| `record_bill_payment` | Record a partial payment against a bill's open occurrence, or settle it in full |
+
+Because tool calls never pass through the Bills pages' controllers, the bills
+tools re-check the family's recurring-transactions feature gate (Settings →
+Recurring transactions) and the MCP user's per-account access on every call.
+With the feature disabled they return an error result instead of data, bills
+tied to accounts the user cannot see are never returned, and the write tools
+refuse series on accounts shared with the user read-only.
 
 They exist for agents that maintain a document-backed record of a family's
 wealth over time. See

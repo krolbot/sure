@@ -285,6 +285,14 @@ class Holding < ApplicationRecord
         .where(security_id: security.id)
         .where("trades.qty > 0 AND entries.date <= ?", date)
 
+      # A transfer is not a purchase: its acquisition cost is unknown, so one
+      # transferred unit makes the whole position's average unknowable.
+      return nil if buy_trades.where(investment_activity_label: Trade::TRANSFER_LABEL).exists?
+
+      buy_trades = buy_trades.where(
+        "trades.investment_activity_label IS DISTINCT FROM ?", Trade::TRANSFER_LABEL
+      )
+
       # Use the same nearest-rate-within-5-days semantics as ExchangeRate.find_or_fetch_rate
       # and Money#exchange_to so weekend/holiday trades resolve consistently.
       nearest_rate_sql = ActiveRecord::Base.sanitize_sql_array([
@@ -298,8 +306,7 @@ class Holding < ApplicationRecord
         ) nearest_fx ON true", account.currency, ExchangeRate::NEAREST_RATE_LOOKBACK_DAYS
       ])
 
-      # If any foreign-currency buy trade has no rate within the lookback window,
-      # cost basis is unknowable — return nil to match ForwardCalculator / ReverseCalculator.
+      # A missing foreign-currency rate also makes cost basis unknowable.
       missing_rate = buy_trades
         .where("trades.currency != ?", account.currency)
         .joins(nearest_rate_sql)
@@ -308,8 +315,6 @@ class Holding < ApplicationRecord
 
       return nil if missing_rate
 
-      # All foreign rates are confirmed present; COALESCE fallback only applies
-      # to domestic (same-currency) trades where treating rate = 1 is correct.
       total_cost, total_qty = buy_trades
         .joins(nearest_rate_sql)
         .pick(

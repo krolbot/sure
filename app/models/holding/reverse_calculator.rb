@@ -74,13 +74,18 @@ class Holding::ReverseCalculator
           price: price.price,
           currency: price.currency,
           amount: qty * price.price,
-          cost_basis: cost_basis_for(security_id, date)
+          cost_basis: cost_basis_for(security_id, date),
+          cost_basis_unknown: transferred_by?(security_id, date)
         )
       end.compact
     end
 
     def precompute_cost_basis
       @cost_basis_snapshots = Hash.new { |h, k| h[k] = [] }
+      # First date a transfer landed on each security. From that day on the
+      # position contains units acquired at a price nothing here knows, so it
+      # has no cost basis — before it, the purchases still stand on their own.
+      @first_transfer_dates = {}
       tracker = Hash.new { |h, k| h[k] = { total_cost: BigDecimal("0"), total_qty: BigDecimal("0") } }
       # Securities whose cost basis became unknowable due to a missing FX rate
       invalid_securities = {}
@@ -90,8 +95,12 @@ class Holding::ReverseCalculator
         next unless trade.qty > 0
 
         security_id = trade.security_id
-        # Once a security is invalid, skip further trades for it — the nil snapshot
-        # from the first failure already propagates nil for all subsequent dates.
+        if trade.investment_activity_label == Trade::TRANSFER_LABEL
+          @first_transfer_dates[security_id] ||= trade_entry.date
+          next
+        end
+
+        # Once FX is unknown, later purchases cannot restore a trustworthy basis.
         next if invalid_securities[security_id]
 
         trade_price = Money.new(trade.price, trade.currency)
@@ -114,7 +123,14 @@ class Holding::ReverseCalculator
       end
     end
 
+    def transferred_by?(security_id, date)
+      first = @first_transfer_dates[security_id]
+      first.present? && first <= date
+    end
+
     def cost_basis_for(security_id, date)
+      return nil if transferred_by?(security_id, date)
+
       snapshots = @cost_basis_snapshots[security_id]
       return nil if snapshots.empty?
 
