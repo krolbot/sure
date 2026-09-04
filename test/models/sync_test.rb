@@ -295,6 +295,20 @@ class SyncTest < ActiveSupport::TestCase
     assert_equal "stale", family_sync.reload.status
   end
 
+  test "cancelling pending descendants loads the tree in one recursive query" do
+    root = Sync.create!(syncable: families(:dylan_family), status: :syncing)
+    child = Sync.create!(syncable: plaid_items(:one), parent: root)
+    Sync.create!(syncable: accounts(:connected), parent: child)
+    queries = []
+
+    subscriber = ->(*args) { queries << args.last[:sql] }
+    ActiveSupport::Notifications.subscribed(subscriber, "sql.active_record") do
+      root.send(:cancel_pending_descendants!)
+    end
+
+    assert_equal 1, queries.count { |sql| sql.include?("WITH RECURSIVE descendants") }
+  end
+
   test "cancel-requested syncs are not visible and do not swallow new sync requests" do
     account = accounts(:depository)
     Sync.where(syncable: account).destroy_all
