@@ -285,12 +285,13 @@ class Holding < ApplicationRecord
         .where(security_id: security.id)
         .where("trades.qty > 0 AND entries.date <= ?", date)
 
-      # A transfer is not a purchase: its acquisition cost is unknown, so one
-      # transferred unit makes the whole position's average unknowable.
-      return nil if buy_trades.where(investment_activity_label: Trade::TRANSFER_LABEL).exists?
+      # An inbound internal movement is not a purchase: its acquisition cost is unknown,
+      # so one transferred unit makes the whole position's average unknowable.
+      return nil if buy_trades.where(investment_activity_label: Trade::INTERNAL_MOVEMENT_LABELS).exists?
 
       buy_trades = buy_trades.where(
-        "trades.investment_activity_label IS DISTINCT FROM ?", Trade::TRANSFER_LABEL
+        "trades.investment_activity_label NOT IN (?) OR trades.investment_activity_label IS NULL",
+        Trade::INTERNAL_MOVEMENT_LABELS
       )
 
       # Use the same nearest-rate-within-5-days semantics as ExchangeRate.find_or_fetch_rate

@@ -1,4 +1,6 @@
 class Holding::ReverseCalculator
+  include Holding::TradeCalculatorHelpers
+
   attr_reader :account, :portfolio_snapshot
 
   def initialize(account, portfolio_snapshot:, security_ids: nil)
@@ -16,25 +18,18 @@ class Holding::ReverseCalculator
   end
 
   private
-    # Reverse calculators will use the existing holdings as a source of security ids and prices
-    # since it is common for a provider to supply "current day" holdings but not all the historical
-    # trades that make up those holdings.
     def portfolio_cache
       @portfolio_cache ||= Holding::PortfolioCache.new(account, use_holdings: true, security_ids: @security_ids)
     end
 
     def calculate_holdings
-      # Start with the portfolio snapshot passed in from the materializer
       current_portfolio = portfolio_snapshot.to_h
       previous_portfolio = {}
-
       holdings = []
 
       Date.current.downto(account.start_date).each do |date|
         today_trades = portfolio_cache.get_trades(date: date)
         previous_portfolio = transform_portfolio(current_portfolio, today_trades, direction: :reverse)
-
-        # If current day, always use holding prices (since that's what Plaid gives us).  For historical values, use market data (since Plaid doesn't supply historical prices)
         holdings.concat(build_holdings(current_portfolio, date, price_source: date == Date.current ? "holding" : nil))
         current_portfolio = previous_portfolio
       end
@@ -47,10 +42,8 @@ class Holding::ReverseCalculator
 
       trade_entries.each do |trade_entry|
         trade = trade_entry.entryable
-        security_id = trade.security_id
-        qty_change = trade.qty
-        qty_change = qty_change * -1 if direction == :reverse
-        new_quantities[security_id] = (new_quantities[security_id] || 0) + qty_change
+        qty_change = direction == :reverse ? -trade.qty : trade.qty
+        new_quantities[trade.security_id] = (new_quantities[trade.security_id] || 0) + qty_change
       end
 
       new_quantities
@@ -61,10 +54,7 @@ class Holding::ReverseCalculator
         next if @security_ids && !@security_ids.include?(security_id)
 
         price = portfolio_cache.get_price(security_id, date, source: price_source)
-
-        if price.nil?
-          next
-        end
+        next if price.nil?
 
         Holding::HoldingData.new(
           account_id: account.id,
@@ -75,61 +65,69 @@ class Holding::ReverseCalculator
           currency: price.currency,
           amount: qty * price.price,
           cost_basis: cost_basis_for(security_id, date),
-          cost_basis_unknown: transferred_by?(security_id, date)
+          cost_basis_unknown: cost_basis_unknown?(security_id, date)
         )
       end.compact
     end
 
     def precompute_cost_basis
       @cost_basis_snapshots = Hash.new { |h, k| h[k] = [] }
-      # First date a transfer landed on each security. From that day on the
-      # position contains units acquired at a price nothing here knows, so it
-      # has no cost basis — before it, the purchases still stand on their own.
-      @first_transfer_dates = {}
-      tracker = Hash.new { |h, k| h[k] = { total_cost: BigDecimal("0"), total_qty: BigDecimal("0") } }
-      # Securities whose cost basis became unknowable due to a missing FX rate
-      invalid_securities = {}
+      @unknown_spans = Hash.new { |h, k| h[k] = [] }
+      trackers = Hash.new { |h, k| h[k] = Holding::CostBasisTracker.new }
+      open_unknown_start = {}
 
-      portfolio_cache.get_trades.sort_by(&:date).each do |trade_entry|
+      # get_trades is already ordered by date, created_at, and id. Preserve that
+      # order because liquidation and same-day repurchase are order-sensitive.
+      trades = portfolio_cache.get_trades
+      net_qty = Hash.new(0)
+      trades.each { |trade_entry| net_qty[trade_entry.entryable.security_id] += trade_entry.entryable.qty }
+      snapshot = portfolio_snapshot.to_h
+      positions = Hash.new(0)
+      net_qty.each_key { |security_id| positions[security_id] = (snapshot[security_id] || 0) - net_qty[security_id] }
+
+      trades.each do |trade_entry|
         trade = trade_entry.entryable
-        next unless trade.qty > 0
-
         security_id = trade.security_id
-        if trade.investment_activity_label == Trade::TRANSFER_LABEL
-          @first_transfer_dates[security_id] ||= trade_entry.date
-          next
+        previous_position = positions[security_id]
+        positions[security_id] += trade.qty
+        tracker = trackers[security_id]
+
+        if trade.internal_movement?
+          if trade.qty.positive?
+            open_unknown_start[security_id] ||= trade_entry.date
+          else
+            tracker.apply(nil, trade.qty)
+            @cost_basis_snapshots[security_id] << [ trade_entry.date, tracker.average_cost ]
+          end
+        elsif trade.qty.positive?
+          begin
+            tracker.apply(converted_trade_price(trade, date: trade_entry.date), trade.qty)
+            @cost_basis_snapshots[security_id] << [ trade_entry.date, tracker.average_cost ]
+          rescue Money::ConversionError
+            Rails.logger.warn("[Holding::ReverseCalculator] No FX rate for #{trade.currency}→#{account.currency} on #{trade_entry.date}. Cost basis for security #{security_id} is unknown.")
+            open_unknown_start[security_id] ||= trade_entry.date
+            @cost_basis_snapshots[security_id] << [ trade_entry.date, nil ]
+          end
+        else
+          tracker.apply(nil, trade.qty)
+          @cost_basis_snapshots[security_id] << [ trade_entry.date, tracker.average_cost ]
         end
 
-        # Once FX is unknown, later purchases cannot restore a trustworthy basis.
-        next if invalid_securities[security_id]
-
-        trade_price = Money.new(trade.price, trade.currency)
-        begin
-          converted_price = trade_price.exchange_to(account.currency, date: trade_entry.date).amount
-        rescue Money::ConversionError
-          Rails.logger.warn("[Holding::ReverseCalculator] No FX rate for #{trade.currency}→#{account.currency} on #{trade_entry.date}. Marking security #{security_id} cost basis as unknown.")
-          invalid_securities[security_id] = true
-          @cost_basis_snapshots[security_id] << [ trade_entry.date, nil ]
-          next
+        if open_unknown_start[security_id] && previous_position.positive? && positions[security_id] <= 0
+          @unknown_spans[security_id] << [ open_unknown_start[security_id], trade_entry.date ]
+          open_unknown_start.delete(security_id)
         end
-
-        tracker[security_id][:total_cost] += converted_price * trade.qty
-        tracker[security_id][:total_qty] += trade.qty
-
-        @cost_basis_snapshots[security_id] << [
-          trade_entry.date,
-          tracker[security_id][:total_cost] / tracker[security_id][:total_qty]
-        ]
       end
+
+      open_unknown_start.each { |security_id, start| @unknown_spans[security_id] << [ start, nil ] }
     end
 
-    def transferred_by?(security_id, date)
-      first = @first_transfer_dates[security_id]
-      first.present? && first <= date
+    def cost_basis_unknown?(security_id, date)
+      @unknown_spans[security_id].any? { |start, stop| start <= date && (stop.nil? || date < stop) }
     end
 
     def cost_basis_for(security_id, date)
-      return nil if transferred_by?(security_id, date)
+      return nil if cost_basis_unknown?(security_id, date)
 
       snapshots = @cost_basis_snapshots[security_id]
       return nil if snapshots.empty?
