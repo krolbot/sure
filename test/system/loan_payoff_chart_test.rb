@@ -21,11 +21,12 @@ class LoanPayoffChartTest < ApplicationSystemTestCase
   SERIES = %w[actual scheduled projected].freeze
 
   setup do
-    sign_in @user = users(:family_admin)
+    @user = users(:family_admin)
   end
 
   test "the chart paints all three lines, in the light theme and the dark" do
     travel_to TODAY do
+      sign_in @user
       account = on_contract_loan_account
 
       visit account_path(account, period: "all_time")
@@ -49,6 +50,7 @@ class LoanPayoffChartTest < ApplicationSystemTestCase
   # same text is real DOM, and it points at no table that is not there.
   test "the SVG carries its description and no data table" do
     travel_to TODAY do
+      sign_in @user
       account = on_contract_loan_account
       payload = Loan::PayoffChart.new(account.loan, as_of: TODAY, period: all_time_period).payload
 
@@ -67,6 +69,7 @@ class LoanPayoffChartTest < ApplicationSystemTestCase
   # otherwise announce on every movement.
   test "arrow keys step the tooltip through the plotted dates and only they announce" do
     travel_to TODAY do
+      sign_in @user
       account = on_contract_loan_account
 
       visit account_path(account, period: "all_time")
@@ -103,6 +106,7 @@ class LoanPayoffChartTest < ApplicationSystemTestCase
   # first payment.
   test "the tooltip splits a scheduled payment into principal and interest" do
     travel_to TODAY do
+      sign_in @user
       account = on_contract_loan_account
       first_payment = account.loan.amortization_schedule.payments.first
 
@@ -134,6 +138,7 @@ class LoanPayoffChartTest < ApplicationSystemTestCase
     @user.update!(locale: "de")
 
     travel_to TODAY do
+      sign_in @user
       account = on_contract_loan_account
 
       visit account_path(account, period: "all_time")
@@ -162,6 +167,7 @@ class LoanPayoffChartTest < ApplicationSystemTestCase
     @user.update!(locale: "de")
 
     travel_to TODAY do
+      sign_in @user
       account = on_contract_loan_account
 
       visit account_path(account, period: "last_365_days")
@@ -192,6 +198,7 @@ class LoanPayoffChartTest < ApplicationSystemTestCase
   # now snaps to the payment dates, as the keyboard does.
   test "a pointer just before a payment date heads the tooltip with that payment's month" do
     travel_to TODAY do
+      sign_in @user
       account = on_contract_loan_account
       payload = Loan::PayoffChart.new(account.loan, as_of: TODAY, period: all_time_period).payload
       dates = payload[:scheduled].map { |point| Date.iso8601(point[:date]) }
