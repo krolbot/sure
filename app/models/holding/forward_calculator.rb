@@ -6,8 +6,12 @@ class Holding::ForwardCalculator
   def initialize(account, security_ids: nil)
     @account = account
     @security_ids = security_ids
+    # Track weighted-average cost basis per security, relieving sells so the
+    # figure stays correct after a position is fully sold and repurchased.
     @cost_basis_trackers = Hash.new { |h, k| h[k] = Holding::CostBasisTracker.new }
-    @cost_basis_invalid = {}
+    # Securities whose position has taken in a transfer. A coin moved in was
+    # acquired at a price nothing here knows, and averaging the purchases alone
+    # would apply their price to units that never cost it.
     @transferred_security_ids = Set.new
   end
 
@@ -19,7 +23,7 @@ class Holding::ForwardCalculator
 
       account.start_date.upto(Date.current).each do |date|
         trades = portfolio_cache.get_trades(date: date)
-        next_portfolio = apply_trades(current_portfolio, trades)
+        next_portfolio = apply_trades(apply_splits(current_portfolio, date), trades)
         holdings.concat(build_holdings(next_portfolio, date))
         current_portfolio = next_portfolio
       end
@@ -42,12 +46,16 @@ class Holding::ForwardCalculator
       empty_portfolio
     end
 
+
     def build_holdings(portfolio, date, price_source: nil)
       portfolio.map do |security_id, qty|
         next if @security_ids && !@security_ids.include?(security_id)
 
         price = portfolio_cache.get_price(security_id, date, source: price_source)
-        next if price.nil?
+
+        if price.nil?
+          next
+        end
 
         Holding::HoldingData.new(
           account_id: account.id,
@@ -57,14 +65,33 @@ class Holding::ForwardCalculator
           price: price.price,
           currency: price.currency,
           amount: qty * price.price,
-          cost_basis: cost_basis_for(security_id),
+          cost_basis: cost_basis_for(security_id, price.currency),
           cost_basis_unknown: cost_basis_unknown?(security_id)
         )
       end.compact
     end
 
-    # Applies trades in order. A full liquidation clears both transfer- and
-    # missing-FX uncertainty, so a later repurchase starts from a clean basis.
+    # A split takes effect at the open of its ex-date, before that day's trades,
+    # which are already in post-split shares (#249). It scales the position and
+    # its cost-basis tracker together, so total cost carries across unchanged.
+    def apply_splits(opening_portfolio, date)
+      opening_portfolio.to_h do |security_id, qty|
+        ratio = portfolio_cache.get_split_ratio(security_id, date)
+        next [ security_id, qty ] unless ratio
+
+        @cost_basis_trackers[security_id].split(ratio)
+        [ security_id, Security::Split.scale(qty, ratio) ]
+      end
+    end
+
+    # Applies the day's trades in order and returns the resulting portfolio, so the
+    # caller does not walk the same trades again to compute quantities.
+    #
+    # Buys raise a security's weighted-average cost basis; sells relieve quantity at
+    # the running average and a full liquidation resets it, so a later repurchase
+    # starts from a clean basis. Tracking the running position here lets an inbound
+    # transfer's "unknown" mark release the moment the position hits zero — even when
+    # a same-day sell-off and repurchase net back to a positive end-of-day quantity.
     def apply_trades(opening_portfolio, trade_entries)
       portfolio = opening_portfolio.dup
 
@@ -72,38 +99,41 @@ class Holding::ForwardCalculator
         trade = trade_entry.entryable
         security_id = trade.security_id
         previous_quantity = portfolio[security_id] || 0
-        tracker = @cost_basis_trackers[security_id]
 
         if trade.internal_movement?
-          trade.qty.positive? ? @transferred_security_ids.add(security_id) : tracker.apply(nil, trade.qty)
-        elsif trade.qty.positive?
-          begin
-            tracker.apply(converted_trade_price(trade, date: trade_entry.date), trade.qty)
-          rescue Money::ConversionError
-            Rails.logger.warn("[Holding::ForwardCalculator] No FX rate for #{trade.currency}→#{account.currency} on #{trade_entry.date}. Cost basis for security #{security_id} is unknown.")
-            @cost_basis_invalid[security_id] = true
+          # An inbound transfer brings in units at a price nothing here knows, so
+          # it makes the whole position's cost basis unknowable. An outbound
+          # transfer only removes units, so relieve them at the running average
+          # (like a sell) rather than leaving them to contaminate a later buy.
+          if trade.qty.positive?
+            @transferred_security_ids << security_id
+          else
+            @cost_basis_trackers[security_id].apply(effective_trade_price(trade, date: trade_entry.date), trade.qty)
           end
         else
-          tracker.apply(nil, trade.qty)
+          @cost_basis_trackers[security_id].apply(effective_trade_price(trade, date: trade_entry.date), trade.qty)
         end
 
         portfolio[security_id] = previous_quantity + trade.qty
-        next unless previous_quantity.positive? && portfolio[security_id] <= 0
 
-        @transferred_security_ids.delete(security_id)
-        @cost_basis_invalid.delete(security_id)
+        # Release the "unknown" mark only on a genuine downward crossing through
+        # zero: a position that was already non-positive never held these units, so
+        # opening and closing must not collapse onto the same trade.
+        @transferred_security_ids.delete(security_id) if previous_quantity.positive? && portfolio[security_id] <= 0
       end
 
       portfolio
     end
 
-    def cost_basis_unknown?(security_id)
-      @cost_basis_invalid[security_id] || @transferred_security_ids.include?(security_id)
-    end
-
-    def cost_basis_for(security_id)
+    # Returns the current cost basis for a security, or nil if nothing is held
+    # or the position contains transferred-in units of unknown cost.
+    def cost_basis_for(security_id, currency)
       return nil if cost_basis_unknown?(security_id)
 
       @cost_basis_trackers[security_id].average_cost
+    end
+
+    def cost_basis_unknown?(security_id)
+      @transferred_security_ids.include?(security_id) || @cost_basis_trackers[security_id].unknown?
     end
 end

@@ -18,18 +18,26 @@ class Holding::ReverseCalculator
   end
 
   private
+    # Reverse calculators will use the existing holdings as a source of security ids and prices
+    # since it is common for a provider to supply "current day" holdings but not all the historical
+    # trades that make up those holdings.
     def portfolio_cache
       @portfolio_cache ||= Holding::PortfolioCache.new(account, use_holdings: true, security_ids: @security_ids)
     end
 
     def calculate_holdings
-      current_portfolio = portfolio_snapshot.to_h
+      # Start with the portfolio snapshot passed in from the materializer,
+      # brought forward to today first (see #starting_portfolio).
+      current_portfolio = starting_portfolio
       previous_portfolio = {}
+
       holdings = []
 
       Date.current.downto(account.start_date).each do |date|
         today_trades = portfolio_cache.get_trades(date: date)
-        previous_portfolio = transform_portfolio(current_portfolio, today_trades, direction: :reverse)
+        previous_portfolio = undo_splits(transform_portfolio(current_portfolio, today_trades, direction: :reverse), date)
+
+        # If current day, always use holding prices (since that's what Plaid gives us).  For historical values, use market data (since Plaid doesn't supply historical prices)
         holdings.concat(build_holdings(current_portfolio, date, price_source: date == Date.current ? "holding" : nil))
         current_portfolio = previous_portfolio
       end
@@ -37,16 +45,57 @@ class Holding::ReverseCalculator
       holdings
     end
 
+    # The snapshot as it stands today.
+    #
+    # The walk below starts at `Date.current` and undoes its way back, so it
+    # reads the snapshot as today's position. A provider snapshot is often
+    # older than that -- a sync that failed and retried late, or a provider
+    # that had not refreshed -- and a split that went ex in between has already
+    # changed the share count the provider reported. Left alone, today's
+    # holding kept the pre-split quantity, and the walk then *undid* that same
+    # split on the way past, so the history came out short as well.
+    #
+    # Each quantity is carried forward by the splits between the day it was
+    # observed and today. Trades in that window are a separate, older gap: this
+    # calculator has always assumed the snapshot already includes them, and
+    # nothing here changes that.
+    def starting_portfolio
+      # A snapshot that reports no dates is read as current, which is what this
+      # did before there were any.
+      @starting_portfolio ||= begin
+        dates = portfolio_snapshot.effective_dates || {}
+
+        portfolio_snapshot.to_h.to_h do |security_id, qty|
+          factor = portfolio_cache.split_factor_between(security_id, dates[security_id], Date.current)
+          next [ security_id, qty ] if factor == 1
+
+          [ security_id, Security::Split.scale(qty, factor) ]
+        end
+      end
+    end
+
     def transform_portfolio(previous_portfolio, trade_entries, direction: :forward)
       new_quantities = previous_portfolio.dup
 
       trade_entries.each do |trade_entry|
         trade = trade_entry.entryable
-        qty_change = direction == :reverse ? -trade.qty : trade.qty
-        new_quantities[trade.security_id] = (new_quantities[trade.security_id] || 0) + qty_change
+        security_id = trade.security_id
+        qty_change = trade.qty
+        qty_change = qty_change * -1 if direction == :reverse
+        new_quantities[security_id] = (new_quantities[security_id] || 0) + qty_change
       end
 
       new_quantities
+    end
+
+    # Walking back from the close of `date` to the close of the day before: once
+    # the day's trades are undone, a split that went ex on `date` is undone too,
+    # since it took effect at that day's open (#249).
+    def undo_splits(portfolio, date)
+      portfolio.to_h do |security_id, qty|
+        ratio = portfolio_cache.get_split_ratio(security_id, date)
+        [ security_id, ratio ? Security::Split.unscale(qty, ratio) : qty ]
+      end
     end
 
     def build_holdings(portfolio, date, price_source: nil)
@@ -54,7 +103,10 @@ class Holding::ReverseCalculator
         next if @security_ids && !@security_ids.include?(security_id)
 
         price = portfolio_cache.get_price(security_id, date, source: price_source)
-        next if price.nil?
+
+        if price.nil?
+          next
+        end
 
         Holding::HoldingData.new(
           account_id: account.id,
@@ -72,54 +124,103 @@ class Holding::ReverseCalculator
 
     def precompute_cost_basis
       @cost_basis_snapshots = Hash.new { |h, k| h[k] = [] }
+      # Spans [start, end) during which a security still holds transferred-in units
+      # of unknown cost. `end` is nil while a span is still open at the last trade.
       @unknown_spans = Hash.new { |h, k| h[k] = [] }
       trackers = Hash.new { |h, k| h[k] = Holding::CostBasisTracker.new }
       open_unknown_start = {}
 
-      # get_trades is already ordered by date, created_at, and id. Preserve that
-      # order because liquidation and same-day repurchase are order-sensitive.
+      # get_trades is already chronological (date, then created_at, then id).
+      # Re-sorting by date alone is unstable and could reorder same-day trades,
+      # which matters because the tracker is order-sensitive once sells relieve.
       trades = portfolio_cache.get_trades
-      net_qty = Hash.new(0)
-      trades.each { |trade_entry| net_qty[trade_entry.entryable.security_id] += trade_entry.entryable.qty }
-      snapshot = portfolio_snapshot.to_h
-      positions = Hash.new(0)
-      net_qty.each_key { |security_id| positions[security_id] = (snapshot[security_id] || 0) - net_qty[security_id] }
+      events = replay_events(trades)
 
-      trades.each do |trade_entry|
+      # A reverse-synced account can hold shares before its first imported trade,
+      # because the provider gives current holdings rather than full history. Seed
+      # each running position by walking the snapshot back through every imported
+      # trade and split, so "position back at zero" reflects the real position,
+      # not just the trades we happen to have. Across a split, "snapshot minus
+      # net trades" is not that: the trades before it are in pre-split shares.
+      # The walk undoes every split up to today, so it starts from the snapshot
+      # brought forward to today, as #calculate_holdings does.
+      snapshot = starting_portfolio
+      positions = Hash.new(0)
+      trades.each { |te| positions[te.entryable.security_id] = snapshot[te.entryable.security_id] || 0 }
+      events.reverse_each do |event|
+        if event.is_a?(Security::Split)
+          next unless positions.key?(event.security_id)
+
+          positions[event.security_id] = Security::Split.unscale(positions[event.security_id], event.ratio)
+        else
+          positions[event.entryable.security_id] -= event.entryable.qty
+        end
+      end
+
+      events.each do |event|
+        if event.is_a?(Security::Split)
+          security_id = event.security_id
+          next unless positions.key?(security_id)
+
+          positions[security_id] = Security::Split.scale(positions[security_id], event.ratio)
+          trackers[security_id].split(event.ratio)
+          @cost_basis_snapshots[security_id] << [ event.ex_date, trackers[security_id].average_cost ]
+          next
+        end
+
+        trade_entry = event
         trade = trade_entry.entryable
         security_id = trade.security_id
         previous_position = positions[security_id]
         positions[security_id] += trade.qty
-        tracker = trackers[security_id]
 
         if trade.internal_movement?
+          # Inbound transfers make the basis unknown from that date on; outbound
+          # transfers only remove units, so relieve them at the running average.
           if trade.qty.positive?
             open_unknown_start[security_id] ||= trade_entry.date
           else
-            tracker.apply(nil, trade.qty)
-            @cost_basis_snapshots[security_id] << [ trade_entry.date, tracker.average_cost ]
-          end
-        elsif trade.qty.positive?
-          begin
-            tracker.apply(converted_trade_price(trade, date: trade_entry.date), trade.qty)
-            @cost_basis_snapshots[security_id] << [ trade_entry.date, tracker.average_cost ]
-          rescue Money::ConversionError
-            Rails.logger.warn("[Holding::ReverseCalculator] No FX rate for #{trade.currency}→#{account.currency} on #{trade_entry.date}. Cost basis for security #{security_id} is unknown.")
-            open_unknown_start[security_id] ||= trade_entry.date
-            @cost_basis_snapshots[security_id] << [ trade_entry.date, nil ]
+            trackers[security_id].apply(effective_trade_price(trade, date: trade_entry.date), trade.qty)
+            @cost_basis_snapshots[security_id] << [ trade_entry.date, trackers[security_id].average_cost ]
           end
         else
-          tracker.apply(nil, trade.qty)
+          tracker = trackers[security_id]
+          # Buys raise the basis; sells relieve quantity at the running average, and a
+          # full liquidation resets it so a later repurchase starts from a clean basis.
+          tracker.apply(effective_trade_price(trade, date: trade_entry.date), trade.qty)
+
+          # A buy whose currency cannot be converted makes the basis unknown just
+          # like an inbound transfer. CostBasisTracker keeps that state until the
+          # position is liquidated; the span also exposes it on HoldingData.
+          open_unknown_start[security_id] ||= trade_entry.date if tracker.unknown?
+
+          # Record the basis after each trade — including nil once a position is fully
+          # closed — so cost_basis_for returns nil for the sold-out span instead of a
+          # stale figure carried forward from the last buy.
           @cost_basis_snapshots[security_id] << [ trade_entry.date, tracker.average_cost ]
         end
 
+        # Close an open unknown span only on a genuine downward crossing through
+        # zero. A position that was already non-positive — e.g. a gapped import
+        # whose reconstructed baseline is negative — never held these units, so
+        # opening and closing must not collapse onto the same trade.
         if open_unknown_start[security_id] && previous_position.positive? && positions[security_id] <= 0
           @unknown_spans[security_id] << [ open_unknown_start[security_id], trade_entry.date ]
           open_unknown_start.delete(security_id)
         end
       end
 
+      # Spans still open at the last trade stay unknown through to the present.
       open_unknown_start.each { |security_id, start| @unknown_spans[security_id] << [ start, nil ] }
+    end
+
+    # Trades and splits in the order they took effect. A split goes first on its
+    # ex-date: it happens at the open, and that day's trades are already in
+    # post-split shares. `trades` is chronological and kept in its own order.
+    def replay_events(trades)
+      events = trades.each_with_index.map { |entry, index| [ entry.date, 1, index, entry ] }
+      events += portfolio_cache.get_splits.map { |split| [ split.ex_date, 0, 0, split ] }
+      events.sort_by { |date, kind, index, _| [ date, kind, index ] }.map(&:last)
     end
 
     def cost_basis_unknown?(security_id, date)

@@ -276,53 +276,80 @@ class Holding < ApplicationRecord
     end
 
     # Calculates weighted average cost from buy trades.
-    # Returns nil if no trades exist or if any foreign-currency trade is missing an
-    # exchange rate within the 5-day lookback window (avoids a silent 1:1 substitution
-    # that would produce a wrong value rather than an honest nil).
+    # Returns nil if no trades exist (cost basis is unknown).
     def calculate_avg_cost
-      buy_trades = account.trades
+      trades = account.trades
         .with_entry
+        .joins(ActiveRecord::Base.sanitize_sql_array([
+          "LEFT JOIN LATERAL (
+            SELECT er.rate
+            FROM exchange_rates er
+            WHERE
+              er.from_currency = trades.currency AND
+              er.to_currency = ? AND
+              er.date BETWEEN entries.date - ? AND entries.date
+            ORDER BY er.date DESC
+            LIMIT 1
+          ) exchange_rates ON TRUE",
+          account.currency,
+          ExchangeRate::Provided::NEAREST_RATE_LOOKBACK_DAYS
+        ]))
         .where(security_id: security.id)
         .where("trades.qty > 0 AND entries.date <= ?", date)
 
-      # An inbound internal movement is not a purchase: its acquisition cost is unknown,
-      # so one transferred unit makes the whole position's average unknowable.
-      return nil if buy_trades.where(investment_activity_label: Trade::INTERNAL_MOVEMENT_LABELS).exists?
+      # An internal movement is not a purchase: securities moved in from elsewhere were
+      # acquired at a price nothing here knows, so treating the day they
+      # arrived as their cost states a number that looks authoritative and is
+      # wrong — a coin bought at 30k and moved in at 60k would report no gain.
+      #
+      # One internal movement makes the whole position unknown, rather than just its own
+      # row. Averaging the purchases alone and applying that to every unit is
+      # the same fabrication in a quieter form: buy one at 30k, receive one, and
+      # the position would report 30k a unit for two units it did not cost that.
+      return nil if trades.where(investment_activity_label: Trade::INTERNAL_MOVEMENT_LABELS).exists?
 
-      buy_trades = buy_trades.where(
+      # IS DISTINCT FROM, because `!=` is NULL for an unlabelled row and would
+      # drop the ordinary purchases that carry no label at all.
+      trades = trades.where(
         "trades.investment_activity_label NOT IN (?) OR trades.investment_activity_label IS NULL",
         Trade::INTERNAL_MOVEMENT_LABELS
       )
 
-      # Use the same nearest-rate-within-5-days semantics as ExchangeRate.find_or_fetch_rate
-      # and Money#exchange_to so weekend/holiday trades resolve consistently.
-      nearest_rate_sql = ActiveRecord::Base.sanitize_sql_array([
-        "LEFT JOIN LATERAL (
-          SELECT er.rate FROM exchange_rates er
-          WHERE er.from_currency = trades.currency
-            AND er.to_currency = ?
-            AND er.date BETWEEN entries.date - ? AND entries.date
-          ORDER BY er.date DESC
-          LIMIT 1
-        ) nearest_fx ON true", account.currency, ExchangeRate::NEAREST_RATE_LOOKBACK_DAYS
-      ])
-
-      # A missing foreign-currency rate also makes cost basis unknowable.
-      missing_rate = buy_trades
-        .where("trades.currency != ?", account.currency)
-        .joins(nearest_rate_sql)
-        .where("nearest_fx.rate IS NULL")
-        .exists?
-
-      return nil if missing_rate
-
-      total_cost, total_qty = buy_trades
-        .joins(nearest_rate_sql)
-        .pick(
-          Arel.sql("SUM(trades.price * trades.qty * COALESCE(nearest_fx.rate, 1))"),
-          Arel.sql("SUM(trades.qty)")
+      # The rate a trade carries itself (extra["exchange_rate"], e.g. IBKR's
+      # fx_rate_to_base) comes before the table's, as in the calculators and
+      # Balance::SyncCache; a trade in the account's own currency converts at 1.
+      # Trade#exchange_rate= stores a number, but a row written to `extra`
+      # directly can hold the same rate as a string, which Trade's validation
+      # and Money#exchange_to both accept -- so a plain decimal string counts
+      # too. Anything else, an exponent or an absurd length included, is not
+      # cast, so it cannot overflow numeric and fail the query.
+      rate = <<~SQL.squish
+        COALESCE(
+          CASE jsonb_typeof(trades.extra->'exchange_rate')
+            WHEN 'number' THEN (trades.extra->>'exchange_rate')::numeric
+            WHEN 'string' THEN CASE WHEN trades.extra->>'exchange_rate' ~ '^[[:space:]]*[+-]?([0-9]{1,20}([.][0-9]{0,20})?|[.][0-9]{1,20})[[:space:]]*$'
+                                    THEN (trades.extra->>'exchange_rate')::numeric END
+          END,
+          exchange_rates.rate
         )
+      SQL
+      foreign = ActiveRecord::Base.sanitize_sql_array([ "trades.currency <> ?", account.currency ])
 
+      # A foreign purchase with no usable rate in the historical lookback has a cost nothing
+      # here knows, so the position's is unknown too, as with an internal
+      # movement -- counting it at 1:1 would state a figure that looks measured
+      # and is not. A rate of zero or less converts nothing, so it counts as
+      # missing, as it does in Money#exchange_to. Checked in the same query as
+      # the totals rather than in another round trip.
+      total_cost, total_qty, rate_missing = trades.pick(
+        Arel.sql("SUM((trades.price * trades.qty + trades.fee) * CASE WHEN #{foreign} THEN #{rate} ELSE 1 END)"),
+        Arel.sql("SUM(trades.qty)"),
+        Arel.sql("BOOL_OR(#{foreign} AND (#{rate} IS NULL OR #{rate} <= 0))")
+      )
+      return nil if rate_missing
+
+      # Return nil when no trades exist - cost basis is genuinely unknown
+      # Previously this fell back to current market price, which was misleading
       return nil unless total_qty && total_qty > 0
 
       Money.new(total_cost / total_qty, currency)
