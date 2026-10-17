@@ -845,6 +845,12 @@ class Account::ProviderImportAdapter
       .where(date: (date - date_window.days)..date) # Pending must be ON or BEFORE posted date
       .where(Transaction.pending_sql("transactions"))
       .order(date: :desc) # Prefer most recent pending transaction
+      .limit(2)
+      .to_a
+
+    # Exact amount/date is not an identity. If two pending entries qualify,
+    # claiming either can silently overwrite a distinct transaction (#2013).
+    return nil unless candidates.one?
 
     candidates.first
   end
