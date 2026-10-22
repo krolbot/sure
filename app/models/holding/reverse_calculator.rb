@@ -117,7 +117,7 @@ class Holding::ReverseCalculator
           currency: price.currency,
           amount: qty * price.price,
           cost_basis: cost_basis_for(security_id, date),
-          cost_basis_unknown: cost_basis_unknown?(security_id, date)
+          cost_basis_unknown: transferred_by?(security_id, date)
         )
       end.compact
     end
@@ -189,11 +189,6 @@ class Holding::ReverseCalculator
           # full liquidation resets it so a later repurchase starts from a clean basis.
           tracker.apply(effective_trade_price(trade, date: trade_entry.date), trade.qty)
 
-          # A buy whose currency cannot be converted makes the basis unknown just
-          # like an inbound transfer. CostBasisTracker keeps that state until the
-          # position is liquidated; the span also exposes it on HoldingData.
-          open_unknown_start[security_id] ||= trade_entry.date if tracker.unknown?
-
           # Record the basis after each trade — including nil once a position is fully
           # closed — so cost_basis_for returns nil for the sold-out span instead of a
           # stale figure carried forward from the last buy.
@@ -223,12 +218,12 @@ class Holding::ReverseCalculator
       events.sort_by { |date, kind, index, _| [ date, kind, index ] }.map(&:last)
     end
 
-    def cost_basis_unknown?(security_id, date)
+    def transferred_by?(security_id, date)
       @unknown_spans[security_id].any? { |start, stop| start <= date && (stop.nil? || date < stop) }
     end
 
     def cost_basis_for(security_id, date)
-      return nil if cost_basis_unknown?(security_id, date)
+      return nil if transferred_by?(security_id, date)
 
       snapshots = @cost_basis_snapshots[security_id]
       return nil if snapshots.empty?

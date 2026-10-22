@@ -1,10 +1,4 @@
 module Family::AutoTransferMatchable
-  # A future-dated rate is only ever a legitimate match for a timezone skew between
-  # a data source and the server (at most a day), not for the provider catching up
-  # on missed days -- unlike the backward direction, it must stay tight so a stale
-  # transaction can't be matched against an unrelated, much-later rate.
-  RATE_LOOKAHEAD_DAYS = 1
-
   # The automatic path's cross-currency tolerance when TRANSFER_MATCH_EXCHANGE_RATE_TOLERANCE
   # is unset or unusable. 10% is the long-standing default. Real-world FX slippage between
   # a transaction's timestamp and the cached daily rate is typically 1-3%, so an operator
@@ -61,9 +55,7 @@ module Family::AutoTransferMatchable
         restrict_cross_currency_to_linked_accounts:,
         require_common_writer:,
         lower_exchange_rate_bound: 1 - exchange_rate_tolerance,
-        upper_exchange_rate_bound: 1 + exchange_rate_tolerance,
-        rate_lookback_days: ExchangeRate::Provided::NEAREST_RATE_LOOKBACK_DAYS,
-        rate_lookahead_days: RATE_LOOKAHEAD_DAYS
+        upper_exchange_rate_bound: 1 + exchange_rate_tolerance
       }
     ])
   end
@@ -165,10 +157,6 @@ module Family::AutoTransferMatchable
       tolerance
     end
 
-    # On a tie in date-distance between a cached rate before and after the outflow date,
-    # the query below prefers the past-dated rate: the forward window exists only to
-    # cover timezone skew, so it must never outrank real historical data.
-
     # A family member who can write to (Account.writable_by) at least one side
     # and to every side that has an owner, so someone can always unlink the
     # match. An owner-less account (owner_id is nullified when its owner is
@@ -226,9 +214,9 @@ module Family::AutoTransferMatchable
     # synced from each account currency to the family currency, so a transfer between
     # two non-family currencies (e.g. RUB -> THB in a USD family) has no direct rate;
     # the cross rate is then derived through the family currency
-    # (RUB -> USD / THB -> USD). Each rate lookup uses the nearest cached rate
-    # in the bounded historical/timezone window; a missing rate leaves the
-    # tolerance check NULL, which drops the pair.
+    # (RUB -> USD / THB -> USD). The rates are plain LEFT JOINs on the unique
+    # (from, to, date) index, so each joins at most one row and the planner can hash
+    # them; a missing rate leaves the tolerance check NULL, which drops the pair.
     # A zero direct rate is treated as missing so it cannot mask a usable derived rate.
     #
     # Candidates are ordered by match_rank before date_diff: exact same-currency matches
@@ -302,36 +290,21 @@ module Family::AutoTransferMatchable
             outflow_candidates.currency <> inflow_candidates.currency
           )
           JOIN accounts outflow_accounts ON outflow_accounts.id = outflow_candidates.account_id
-          LEFT JOIN LATERAL (
-            SELECT er.rate
-            FROM exchange_rates er
-            WHERE
-              er.from_currency = outflow_candidates.currency AND
-              er.to_currency = inflow_candidates.currency AND
-              er.date BETWEEN outflow_candidates.date - :rate_lookback_days AND outflow_candidates.date + :rate_lookahead_days
-            ORDER BY ABS(er.date - outflow_candidates.date) ASC, er.date ASC
-            LIMIT 1
-          ) direct_rates ON TRUE
-          LEFT JOIN LATERAL (
-            SELECT er.rate
-            FROM exchange_rates er
-            WHERE
-              er.from_currency = outflow_candidates.currency AND
-              er.to_currency = :family_currency AND
-              er.date BETWEEN outflow_candidates.date - :rate_lookback_days AND outflow_candidates.date + :rate_lookahead_days
-            ORDER BY ABS(er.date - outflow_candidates.date) ASC, er.date ASC
-            LIMIT 1
-          ) outflow_family_rates ON TRUE
-          LEFT JOIN LATERAL (
-            SELECT er.rate
-            FROM exchange_rates er
-            WHERE
-              er.from_currency = inflow_candidates.currency AND
-              er.to_currency = :family_currency AND
-              er.date BETWEEN outflow_candidates.date - :rate_lookback_days AND outflow_candidates.date + :rate_lookahead_days
-            ORDER BY ABS(er.date - outflow_candidates.date) ASC, er.date ASC
-            LIMIT 1
-          ) inflow_family_rates ON TRUE
+          LEFT JOIN exchange_rates direct_rates ON (
+            direct_rates.date = outflow_candidates.date AND
+            direct_rates.from_currency = outflow_candidates.currency AND
+            direct_rates.to_currency = inflow_candidates.currency
+          )
+          LEFT JOIN exchange_rates outflow_family_rates ON (
+            outflow_family_rates.date = outflow_candidates.date AND
+            outflow_family_rates.from_currency = outflow_candidates.currency AND
+            outflow_family_rates.to_currency = :family_currency
+          )
+          LEFT JOIN exchange_rates inflow_family_rates ON (
+            inflow_family_rates.date = outflow_candidates.date AND
+            inflow_family_rates.from_currency = inflow_candidates.currency AND
+            inflow_family_rates.to_currency = :family_currency
+          )
           LEFT JOIN (
             SELECT DISTINCT
               route_outflows.account_id AS outflow_account_id,

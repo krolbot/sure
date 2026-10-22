@@ -157,7 +157,7 @@ At the time of writing, `tools/list` includes:
 | `create_category` / `update_category` | Manage categories |
 | `delete_category` | Delete a category, optionally reassigning its transactions |
 | `create_transaction` / `delete_transaction` | Create and delete standard income and expense transactions |
-| `get_transfers` / `create_transfer` / `update_transfer` / `delete_transfer` | List and manage transfers between writable accounts |
+| `get_transfers` / `create_transfer` / `update_transfer` / `delete_transfer` | List and manage transfers between writable accounts. `update_transfer` accepts a stable transfer ID (or either transaction ID), edits amount/date/notes/rate, and can switch confirmed cash-to-Investment/Crypto transfers between spending and plain-transfer treatment with an optional dry-run. |
 | `update_transaction` | Edit a transaction's metadata (name, notes, category, merchant, tags) |
 | `update_budget` | Update budget allocations for a month |
 | `get_rules` / `get_rule_options` | Transaction rules in readable form (ids resolved to names, latest run; paginated, with a text search), and the condition and action types a rule can use |
@@ -167,7 +167,7 @@ At the time of writing, `tools/list` includes:
 | `import_bank_statement` | Import bank statement data |
 | `search_family_files` | Search documents uploaded through the import flow. Note this is the vector-store document index, not the Statement Vault — statements archived via `upload_account_statement` are not searchable through it |
 
-`get_accounts`, `get_goals`, `get_tags`, `get_transfers`, and the other list tools return the stable IDs required by follow-up actions. `get_accounts` includes each account's current type, subtype, permission, and `goal_funding` status. Goal create/update calls use one complete `funding_accounts` list; every item identifies an account ID and chooses either `whole_account` or `fixed_amount`. Call `get_account_types` before `create_account` or a subtype-changing `update_account` call to discover valid subtype values. In `get_accounts`, `writable` means the account can be used for account-level and balance-affecting write tools; `transaction_editing.annotations` separately reports whether the user can update transaction notes, categories, merchants, or tags on that account. Creation tools that accept an `external_id` require the caller to reuse the same key when retrying an operation.
+`get_accounts`, `get_goals`, `get_tags`, `get_transfers`, and the other list tools return the stable IDs required by follow-up actions. `get_accounts` includes each account's current type, subtype, permission, and `goal_funding` status. Goal create/update calls use one complete `funding_accounts` list; every item identifies an account ID and chooses either `whole_account` or `fixed_amount`. Call `get_account_types` before `create_account` to discover valid subtype values. In `get_accounts`, `writable` means the account can be used for account-level and balance-affecting write tools; `transaction_editing.annotations` separately reports whether the user can update transaction notes, categories, merchants, or tags on that account. Creation tools that accept an `external_id` require the caller to reuse the same key when retrying an operation.
 
 Destructive MCP-only tools are not automatically exposed to Sure's built-in
 assistant.

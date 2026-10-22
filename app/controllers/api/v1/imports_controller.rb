@@ -6,6 +6,7 @@ class Api::V1::ImportsController < Api::V1::BaseController
   # Ensure proper scope authorization
   before_action :ensure_read_scope, only: [ :index, :show, :rows, :preflight ]
   before_action :ensure_write_scope, only: [ :create ]
+  before_action :reject_guest_family_config_import!, only: [ :create ]
   before_action :set_import_with_rows, only: [ :show ]
   before_action :set_import, only: [ :rows ]
 
@@ -71,7 +72,7 @@ class Api::V1::ImportsController < Api::V1::BaseController
 
     # 2. Build the import object with permitted config attributes
     @import = family.imports.build(import_config_params.merge(type: type))
-    @import.account = writable_import_account if params[:account_id].present?
+    @import.account_id = params[:account_id] if params[:account_id].present?
 
     # 3. Attach the uploaded file if present (with validation)
     if params[:file].present?
@@ -119,6 +120,10 @@ class Api::V1::ImportsController < Api::V1::BaseController
       # For API simplicity, if enough info is provided, we might want to trigger processing
 
       if @import.configured? && params[:publish] == "true"
+        if current_resource_owner.guest? && @import.creates_categories_or_tags?
+          return render_json({ error: "forbidden", message: "Guests cannot create categories or tags", import_id: @import.id }, status: :forbidden)
+        end
+
         @import.publish_later
       end
 
@@ -131,22 +136,19 @@ class Api::V1::ImportsController < Api::V1::BaseController
       }, status: :unprocessable_entity
     end
 
-  rescue ActiveRecord::RecordNotFound
-    render_account_not_found
   rescue StandardError => e
     Rails.logger.error "ImportsController#create error: #{e.message}"
     render json: { error: "internal_server_error", message: "An unexpected error occurred." }, status: :internal_server_error
   end
 
   def preflight
-    preflight_result = Import::Preflight.new(
-      family: current_resource_owner.family,
-      resource_owner: current_resource_owner,
-      params: preflight_params
-    ).call
+    preflight_result = Import::Preflight.new(family: current_resource_owner.family, params: preflight_params).call
     render json: preflight_result.payload, status: preflight_result.status
   rescue ActiveRecord::RecordNotFound
-    render_account_not_found
+    render json: {
+      error: "record_not_found",
+      message: "The requested resource was not found"
+    }, status: :not_found
   rescue CSV::MalformedCSVError => e
     render json: {
       error: "invalid_csv",
@@ -164,6 +166,12 @@ class Api::V1::ImportsController < Api::V1::BaseController
   end
 
   private
+
+    def reject_guest_family_config_import!
+      return true unless Import::FAMILY_CONFIG_TYPES.include?(params[:type].to_s)
+
+      reject_guest_writes!
+    end
 
     def set_import
       @import = import_scope.find(params[:id])
@@ -183,13 +191,6 @@ class Api::V1::ImportsController < Api::V1::BaseController
 
     def render_import_not_found
       render json: { error: "not_found", message: "Import not found" }, status: :not_found
-    end
-
-    def render_account_not_found
-      render json: {
-        error: "not_found",
-        message: "The requested resource was not found"
-      }, status: :not_found
     end
 
     def ensure_read_scope
@@ -227,13 +228,6 @@ class Api::V1::ImportsController < Api::V1::BaseController
 
     def preflight_params
       params.permit(*Import::Preflight::PARAM_KEYS)
-    end
-
-    def writable_import_account
-      raise ActiveRecord::RecordNotFound unless valid_uuid?(params[:account_id])
-
-      writable_accounts = current_resource_owner.family.accounts.writable_by(current_resource_owner)
-      writable_accounts.find(params[:account_id])
     end
 
     def create_sure_import(family)

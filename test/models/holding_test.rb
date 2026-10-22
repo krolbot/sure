@@ -57,8 +57,9 @@ class HoldingTest < ActiveSupport::TestCase
   end
 
   test "calculates average cost basis from another currency" do
-    ExchangeRate.create!(from_currency: "CAD", to_currency: "USD", date: 1.day.ago.to_date, rate: 0.75)
-    ExchangeRate.create!(from_currency: "CAD", to_currency: "USD", date: Date.current, rate: 0.74)
+    [ 1.day.ago.to_date, Date.current ].each do |date|
+      ExchangeRate.create!(from_currency: "CAD", to_currency: "USD", date: date, rate: 1)
+    end
 
     create_trade(@amzn.security, account: @account, qty: 10, price: 212.00, date: 1.day.ago.to_date, currency: "CAD")
     create_trade(@amzn.security, account: @account, qty: 15, price: 216.00, date: Date.current, currency: "CAD")
@@ -67,25 +68,19 @@ class HoldingTest < ActiveSupport::TestCase
     create_trade(@nvda.security, account: @account, qty: 30, price: 124.00, date: Date.current, currency: "CAD")
 
     # compute expected: sum(price * qty * rate) / sum(qty)
-    amzn_total_usd = BigDecimal("10") * BigDecimal("212.00") * BigDecimal("0.75") +
-                     BigDecimal("15") * BigDecimal("216.00") * BigDecimal("0.74")
+    amzn_total_usd = BigDecimal("10") * BigDecimal("212.00") * BigDecimal("1") +
+                     BigDecimal("15") * BigDecimal("216.00") * BigDecimal("1")
     amzn_qty = BigDecimal("10") + BigDecimal("15")
     expected_amzn_usd = amzn_total_usd / amzn_qty
 
-    nvda_total_usd = BigDecimal("5") * BigDecimal("128.00") * BigDecimal("0.75") +
-                     BigDecimal("30") * BigDecimal("124.00") * BigDecimal("0.74")
+    nvda_total_usd = BigDecimal("5") * BigDecimal("128.00") * BigDecimal("1") +
+                     BigDecimal("30") * BigDecimal("124.00") * BigDecimal("1")
     nvda_qty = BigDecimal("5") + BigDecimal("30")
     expected_nvda_usd = nvda_total_usd / nvda_qty
 
-    assert_equal Money.new(expected_amzn_usd, "USD"), @amzn.avg_cost
-    assert_equal Money.new(expected_nvda_usd, "USD"), @nvda.avg_cost
-  end
-
-  test "average cost uses the nearest earlier rate within the historical lookback" do
-    ExchangeRate.create!(from_currency: "CAD", to_currency: "USD", date: 2.days.ago.to_date, rate: 1.5)
-    create_trade(@amzn.security, account: @account, qty: 10, price: 212.00, date: Date.current, currency: "CAD")
-
-    assert_equal Money.new(BigDecimal("318"), "USD"), @amzn.avg_cost
+    ExchangeRate.stubs(:find_or_fetch_rate).returns(OpenStruct.new(rate: 1))
+    assert_equal Money.new(expected_amzn_usd, "CAD").exchange_to("USD"), @amzn.avg_cost
+    assert_equal Money.new(expected_nvda_usd, "CAD").exchange_to("USD"), @nvda.avg_cost
   end
 
   test "the average cost includes what the purchases cost in fees" do

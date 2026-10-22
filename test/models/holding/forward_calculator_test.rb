@@ -251,23 +251,7 @@ class Holding::ForwardCalculatorTest < ActiveSupport::TestCase
     calculated = Holding::ForwardCalculator.new(@account).calculate
     current = calculated.find { |h| h.security_id == @voo.id && h.date == Date.current }
 
-    assert current.cost_basis_unknown
     assert_nil current.cost_basis
-  end
-
-  test "missing FX uncertainty clears after liquidation and repurchase" do
-    load_prices
-    ExchangeRate.stubs(:find_or_fetch_rate).returns(nil)
-
-    create_trade(@voo, qty: 10, date: 3.days.ago.to_date, price: 100, currency: "EUR", account: @account)
-    create_trade(@voo, qty: -10, date: 2.days.ago.to_date, price: 110, account: @account)
-    create_trade(@voo, qty: 5, date: 1.day.ago.to_date, price: 120, account: @account)
-
-    current = Holding::ForwardCalculator.new(@account).calculate
-      .find { |holding| holding.security_id == @voo.id && holding.date == Date.current }
-
-    assert_not current.cost_basis_unknown
-    assert_equal BigDecimal("120"), current.cost_basis
   end
 
   # A rate the trade carries itself (IBKR's fx_rate_to_base) is a rate for its

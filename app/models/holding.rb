@@ -41,6 +41,13 @@ class Holding < ApplicationRecord
     account.balance.zero? ? 1 : amount_in_account_currency / account.balance * 100
   end
 
+  # The stored per-share cost when it is a real value:
+  # - If locked (user-set), trust the value even if 0 (valid for airdrops)
+  # - Otherwise require positive since providers sometimes return 0 when unknown
+  def known_cost_basis
+    cost_basis if cost_basis.present? && (cost_basis_locked? || cost_basis.positive?)
+  end
+
   # Returns average cost per share, or nil if unknown.
   #
   # Uses pre-computed cost_basis if available (set during materialization),
@@ -48,13 +55,7 @@ class Holding < ApplicationRecord
   # basis cannot be determined (no trades and no provider cost_basis).
   def avg_cost
     # Use stored cost_basis if available (eliminates N+1 queries)
-    # - If locked (user-set), trust the value even if 0 (valid for airdrops)
-    # - Otherwise require positive since providers sometimes return 0 when unknown
-    if cost_basis.present?
-      if cost_basis_locked? || cost_basis.positive?
-        return Money.new(cost_basis, currency)
-      end
-    end
+    return Money.new(known_cost_basis, currency) if known_cost_basis
 
     # Fallback to calculation for holdings without pre-computed cost_basis
     calculate_avg_cost
@@ -281,18 +282,11 @@ class Holding < ApplicationRecord
       trades = account.trades
         .with_entry
         .joins(ActiveRecord::Base.sanitize_sql_array([
-          "LEFT JOIN LATERAL (
-            SELECT er.rate
-            FROM exchange_rates er
-            WHERE
-              er.from_currency = trades.currency AND
-              er.to_currency = ? AND
-              er.date BETWEEN entries.date - ? AND entries.date
-            ORDER BY er.date DESC
-            LIMIT 1
-          ) exchange_rates ON TRUE",
-          account.currency,
-          ExchangeRate::Provided::NEAREST_RATE_LOOKBACK_DAYS
+          "LEFT JOIN exchange_rates ON (
+            exchange_rates.date = entries.date AND
+            exchange_rates.from_currency = trades.currency AND
+            exchange_rates.to_currency = ?
+          )", account.currency
         ]))
         .where(security_id: security.id)
         .where("trades.qty > 0 AND entries.date <= ?", date)
@@ -335,7 +329,7 @@ class Holding < ApplicationRecord
       SQL
       foreign = ActiveRecord::Base.sanitize_sql_array([ "trades.currency <> ?", account.currency ])
 
-      # A foreign purchase with no usable rate in the historical lookback has a cost nothing
+      # A foreign purchase with no usable rate for its day has a cost nothing
       # here knows, so the position's is unknown too, as with an internal
       # movement -- counting it at 1:1 would state a figure that looks measured
       # and is not. A rate of zero or less converts nothing, so it counts as

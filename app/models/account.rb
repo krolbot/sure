@@ -62,6 +62,12 @@ class Account < ApplicationRecord
     visible.manual
   }
 
+  # The manual accounts +user+ may see, as /accounts lists them. Admins are
+  # not exempt: an admin sees what they own or were shared, as on /accounts.
+  scope :visible_manual_for, ->(user) {
+    visible_manual.where(id: user.accessible_accounts.select(:id))
+  }
+
   scope :listable_manual, -> {
     manual.where.not(status: :pending_deletion)
   }
@@ -114,19 +120,6 @@ class Account < ApplicationRecord
     left_joins(:account_shares)
       .where("accounts.owner_id = :uid OR (account_shares.user_id = :uid AND account_shares.permission IN (:permissions))",
              uid: user.id, permissions: AccountShare::ANNOTATE_PERMISSIONS)
-      .distinct
-  }
-
-  # Accounts where a user may change non-structural annotations without
-  # receiving full account control.
-  scope :annotatable_by, ->(user) {
-    left_joins(:account_shares)
-      .where(
-        "accounts.owner_id = :uid OR " \
-        "(account_shares.user_id = :uid AND account_shares.permission IN (:permissions))",
-        uid: user.id,
-        permissions: %w[full_control read_write]
-      )
       .distinct
   }
 

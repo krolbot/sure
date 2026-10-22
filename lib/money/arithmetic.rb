@@ -15,13 +15,9 @@ module Money::Arithmetic
     if other.is_a?(Money)
       ensure_same_currency!(other, :-)
       self.class.new(amount - other.amount, currency)
-    elsif other.is_a?(CoercedNumeric)
-      # Coerced => the original expression was `other.value - self`
-      # (Ruby called us back via #coerce). Subtraction isn't commutative,
-      # so honor the operand order instead of computing `amount - value`.
-      self.class.new(other.value - amount, currency)
     else
-      self.class.new(amount - other, currency)
+      value = other.is_a?(CoercedNumeric) ? other.value : other
+      self.class.new(amount - value, currency)
     end
   end
 

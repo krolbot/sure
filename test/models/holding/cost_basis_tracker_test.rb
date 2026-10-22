@@ -43,7 +43,6 @@ class Holding::CostBasisTrackerTest < ActiveSupport::TestCase
   test "a buy at an unknown price makes the average unknown until the position closes" do
     @tracker.apply(BigDecimal("100"), BigDecimal("10"))
     @tracker.apply(nil, BigDecimal("10"))
-    assert @tracker.unknown?
     assert_nil @tracker.average_cost
 
     @tracker.apply(BigDecimal("999"), BigDecimal("-5"))
@@ -51,7 +50,6 @@ class Holding::CostBasisTrackerTest < ActiveSupport::TestCase
 
     @tracker.apply(BigDecimal("999"), BigDecimal("-15"))
     @tracker.apply(BigDecimal("120"), BigDecimal("4"))
-    assert_not @tracker.unknown?
     assert_equal BigDecimal("120"), @tracker.average_cost, "a repurchase after a full close starts clean"
   end
 

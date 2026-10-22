@@ -68,10 +68,6 @@ class Holding::CostBasisTracker
     @total_cost / @total_qty
   end
 
-  def unknown?
-    @unknown
-  end
-
   private
     def reset
       @total_cost = BigDecimal("0")

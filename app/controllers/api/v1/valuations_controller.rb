@@ -9,7 +9,6 @@ class Api::V1::ValuationsController < Api::V1::BaseController
   before_action :ensure_read_scope, only: [ :index, :show ]
   before_action :ensure_write_scope, only: [ :create, :update ]
   before_action :set_valuation, only: [ :show, :update ]
-  before_action :ensure_writable_entry, only: :update
 
   def index
     family = current_resource_owner.family
@@ -84,9 +83,7 @@ class Api::V1::ValuationsController < Api::V1::BaseController
       return
     end
 
-    account = current_resource_owner.family.accounts
-                .writable_by(current_resource_owner)
-                .find(valuation_account_id)
+    account = current_resource_owner.family.accounts.find(valuation_account_id)
     requested_upsert = upsert_requested?
     existing_write = false
 
@@ -235,12 +232,9 @@ class Api::V1::ValuationsController < Api::V1::BaseController
   private
 
     def set_valuation
-      accessible_account_ids = current_resource_owner.family.accounts
-                                 .accessible_by(current_resource_owner)
-                                 .select(:id)
       @entry = current_resource_owner.family
                  .entries
-                 .where(entryable_type: "Valuation", account_id: accessible_account_ids)
+                 .where(entryable_type: "Valuation")
                  .find(params[:id])
       @valuation = @entry.entryable
     rescue ActiveRecord::RecordNotFound
@@ -248,17 +242,6 @@ class Api::V1::ValuationsController < Api::V1::BaseController
         error: "not_found",
         message: "Valuation not found"
       }, status: :not_found
-    end
-
-    def ensure_writable_entry
-      return if current_resource_owner.family.accounts
-                  .writable_by(current_resource_owner)
-                  .exists?(id: @entry.account_id)
-
-      render json: {
-        error: "forbidden",
-        message: "You do not have write access to this account"
-      }, status: :forbidden
     end
 
     def ensure_read_scope

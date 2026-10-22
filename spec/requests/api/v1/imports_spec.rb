@@ -47,7 +47,6 @@ RSpec.describe 'API V1 Imports', type: :request do
   let(:account) do
     Account.create!(
       family: family,
-      owner: user,
       name: 'Test Checking',
       balance: 1000,
       currency: 'USD',
@@ -145,7 +144,7 @@ RSpec.describe 'API V1 Imports', type: :request do
           account_id: {
             type: :string,
             format: :uuid,
-            description: 'Writable account ID to import into'
+            description: 'Account ID to import into'
           },
           publish: {
             type: :string,
@@ -251,6 +250,25 @@ RSpec.describe 'API V1 Imports', type: :request do
         run_test!
       end
 
+      response '403', 'guest users cannot import family configuration' do
+        schema oneOf: [
+          { '$ref' => '#/components/schemas/ErrorResponse' },
+          { '$ref' => '#/components/schemas/ErrorResponseWithImportId' }
+        ]
+
+        let(:user) do
+          family.users.create!(
+            email: 'api-guest@example.com',
+            password: 'password123',
+            password_confirmation: 'password123',
+            role: 'guest'
+          )
+        end
+        let(:body) { { raw_file_content: "name\nGroceries", type: 'CategoryImport' } }
+
+        run_test!
+      end
+
       response '422', 'validation error or publish rejection' do
         schema oneOf: [
           { '$ref' => '#/components/schemas/ErrorResponse' },
@@ -261,24 +279,6 @@ RSpec.describe 'API V1 Imports', type: :request do
           {
             raw_file_content: 'x' * (11 * 1024 * 1024), # 11MB, exceeds MAX_CSV_SIZE
             type: 'TransactionImport'
-          }
-        end
-
-        run_test!
-      end
-
-      response '404',
-               'account does not exist, is outside the authenticated user family, or is not writable by the authenticated user' do
-        schema '$ref' => '#/components/schemas/ErrorResponse'
-
-        let(:body) do
-          {
-            raw_file_content: "date,amount,name\n01/15/2024,50.00,New Transaction",
-            type: 'TransactionImport',
-            account_id: SecureRandom.uuid,
-            date_col_label: 'date',
-            amount_col_label: 'amount',
-            name_col_label: 'name'
           }
         end
 
@@ -426,7 +426,7 @@ RSpec.describe 'API V1 Imports', type: :request do
           account_id: {
             type: :string,
             format: :uuid,
-            description: 'Accessible account ID used for account-scoped CSV import validation'
+            description: 'Account ID used for account-scoped CSV import validation'
           },
           date_col_label: { type: :string, description: 'CSV imports only. Header name for the date column' },
           amount_col_label: { type: :string, description: 'CSV imports only. Header name for the amount column' },

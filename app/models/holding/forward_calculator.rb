@@ -66,7 +66,7 @@ class Holding::ForwardCalculator
           currency: price.currency,
           amount: qty * price.price,
           cost_basis: cost_basis_for(security_id, price.currency),
-          cost_basis_unknown: cost_basis_unknown?(security_id)
+          cost_basis_unknown: @transferred_security_ids.include?(security_id)
         )
       end.compact
     end
@@ -128,12 +128,8 @@ class Holding::ForwardCalculator
     # Returns the current cost basis for a security, or nil if nothing is held
     # or the position contains transferred-in units of unknown cost.
     def cost_basis_for(security_id, currency)
-      return nil if cost_basis_unknown?(security_id)
+      return nil if @transferred_security_ids.include?(security_id)
 
       @cost_basis_trackers[security_id].average_cost
-    end
-
-    def cost_basis_unknown?(security_id)
-      @transferred_security_ids.include?(security_id) || @cost_basis_trackers[security_id].unknown?
     end
 end
