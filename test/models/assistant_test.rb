@@ -19,14 +19,27 @@ class AssistantTest < ActiveSupport::TestCase
     assert_includes preview_classes, Assistant::Function::GetValuations
   end
 
+  test "destructive category deletion remains MCP-only" do
+    admin = users(:family_admin)
+
+    assert_not_includes Assistant.function_classes, Assistant::Function::DeleteCategory
+    assert_not_includes Assistant.function_classes(admin), Assistant::Function::DeleteCategory
+    assert_includes Assistant.mcp_function_classes(admin), Assistant::Function::DeleteCategory
+  end
+
   test "guest registry leaves out the tools that change categories and tags" do
-    guest_classes = Assistant.function_classes(family_guest)
+    guest = family_guest
+    guest_classes = Assistant.function_classes(guest)
+    guest_mcp_classes = Assistant.mcp_function_classes(guest)
+    admin_mcp_classes = Assistant.mcp_function_classes(users(:family_admin))
 
     Assistant::FAMILY_CONFIG_FUNCTION_CLASSES.each do |fn_class|
       assert_not_includes guest_classes, fn_class
-      assert_includes Assistant.function_classes(users(:family_admin)), fn_class
+      assert_not_includes guest_mcp_classes, fn_class
+      assert_includes admin_mcp_classes, fn_class
     end
     assert_includes guest_classes, Assistant::Function::GetCategories
+    assert_includes guest_mcp_classes, Assistant::Function::GetCategories
   end
 
   setup do
