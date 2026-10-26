@@ -41,7 +41,8 @@ module Assistant
     Function::CreateTag,
     Function::UpdateTag,
     Function::CreateCategory,
-    Function::UpdateCategory
+    Function::UpdateCategory,
+    Function::DeleteCategory
   ].freeze
 
   class << self
@@ -91,6 +92,9 @@ module Assistant
         Function::ApplyRule,
         Function::CreateTransaction,
         Function::UpdateTransaction,
+        Function::GetTransferMatchCandidates,
+        Function::MatchTransfer,
+        Function::ReviewTransfer,
         Function::UpdateBudget
       ]
 
@@ -100,7 +104,7 @@ module Assistant
     end
 
     def mcp_function_classes(user = nil)
-      function_classes(user) + [
+      classes = function_classes(user) + [
         Function::GetAccountTypes,
         Function::GetTransfers,
         Function::GetGoals,
@@ -115,6 +119,8 @@ module Assistant
         Function::DeleteTag,
         Function::DeleteCategory
       ]
+      classes -= FAMILY_CONFIG_FUNCTION_CLASSES if user&.guest?
+      classes
     end
 
     private

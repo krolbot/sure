@@ -154,11 +154,13 @@ At the time of writing, `tools/list` includes:
 | `delete_tag` | Delete a tag, optionally reassigning its transactions |
 | `set_opening_balance` | Set a manual account's opening balance and the date it applies from, reporting whether the current balance changes. Supports `dry_run` |
 | `unmatch_transfer` | Unlink a confirmed or pending transfer (by either transaction's id) so a wrong match can be redone; rejects the pairing for auto-match by default. Supports `dry_run` |
-| `create_category` / `update_category` | Manage categories |
-| `delete_category` | Delete a category, optionally reassigning its transactions |
+| `create_category` / `update_category` / `delete_category` | Manage categories: create, rename, recolor, move between parents, and delete (optionally moving transactions to a replacement) |
 | `create_transaction` / `delete_transaction` | Create and delete standard income and expense transactions |
 | `get_transfers` / `create_transfer` / `update_transfer` / `delete_transfer` | List and manage transfers between writable accounts. `update_transfer` accepts a stable transfer ID (or either transaction ID), edits amount/date/notes/rate, and can switch confirmed cash-to-Investment/Crypto transfers between spending and plain-transfer treatment with an optional dry-run. |
 | `update_transaction` | Edit a transaction's metadata (name, notes, category, merchant, tags) |
+| `get_transfer_match_candidates` | A transaction's current transfer (including a pending auto-match) or the transactions it could be matched with, as in the "Match transfer" dialog |
+| `match_transfer` | Match a transaction as a transfer with an existing counterpart, or create the counterpart in a target account (e.g. a manual loan). Supports `dry_run` |
+| `review_transfer` | Confirm or reject a pending auto-matched transfer |
 | `update_budget` | Update budget allocations for a month |
 | `get_rules` / `get_rule_options` | Transaction rules in readable form (ids resolved to names, latest run; paginated, with a text search), and the condition and action types a rule can use |
 | `preview_rule` | Match count and a sample of matching transactions for a saved rule or an unsaved definition, without changing anything |

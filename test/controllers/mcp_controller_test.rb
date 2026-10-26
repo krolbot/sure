@@ -324,6 +324,9 @@ class McpControllerTest < ActionDispatch::IntegrationTest
       assert_includes tool_names, "create_transaction"
       assert_includes tool_names, "update_transaction"
       assert_includes tool_names, "update_budget"
+      assert_includes tool_names, "get_transfer_match_candidates"
+      assert_includes tool_names, "match_transfer"
+      assert_includes tool_names, "review_transfer"
 
       expected_action_tools = %w[
         create_account update_account delete_account
@@ -335,7 +338,7 @@ class McpControllerTest < ActionDispatch::IntegrationTest
         update_budget
       ]
       assert_empty expected_action_tools - tool_names
-      assert_equal 42, tools.size
+      assert_equal 45, tools.size
       assert_includes Assistant.mcp_function_classes(@user), Assistant::Function::DeleteTransaction
       assert_not_includes Assistant.function_classes, Assistant::Function::DeleteTransaction
 
