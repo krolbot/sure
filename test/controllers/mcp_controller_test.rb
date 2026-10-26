@@ -352,6 +352,28 @@ class McpControllerTest < ActionDispatch::IntegrationTest
     end
   end
 
+  test "tools/list preserves the preview inventory without hiding baseline tools or adding duplicates" do
+    with_mcp_env do
+      post "/mcp", params: jsonrpc_request("tools/list").to_json, headers: mcp_headers(@token)
+      assert_response :ok
+      baseline_names = JSON.parse(response.body).fetch("result").fetch("tools").map { |tool| tool.fetch("name") }
+
+      @user.update!(preferences: (@user.preferences || {}).merge("preview_features_enabled" => true))
+      post "/mcp", params: jsonrpc_request("tools/list").to_json, headers: mcp_headers(@token)
+      assert_response :ok
+      preview_names = JSON.parse(response.body).fetch("result").fetch("tools").map { |tool| tool.fetch("name") }
+
+      expected_preview = %w[
+        upload_account_statement list_account_statements get_account_statement get_statement_coverage
+        record_valuation get_valuations get_insights
+        get_bills get_bill_details get_paycheck_plan get_bill_audit create_bill update_bill record_bill_payment
+      ]
+      assert_empty baseline_names - preview_names
+      assert_equal expected_preview.sort, (preview_names - baseline_names).sort
+      assert_equal preview_names.size, preview_names.uniq.size
+    end
+  end
+
   test "tools/call returns discoverable account subtype values" do
     with_mcp_env do
       post "/mcp", params: jsonrpc_request("tools/call", {
