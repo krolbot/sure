@@ -222,6 +222,16 @@ en:
       confirm_button: Reset Cache
       success: AI cache is being cleared. This may take a few moments.
     condition_filters:
+      labels:
+        transaction_name: Transaction name
+        transaction_amount: Transaction amount
+        transaction_type: Transaction type
+        transaction_merchant: Transaction merchant
+        transaction_category: Transaction category
+        transaction_tag: Transaction tag
+        transaction_details: Transaction details
+        transaction_notes: Transaction notes
+        transaction_account: Transaction account
       transaction_additional_detail:
         label: Additional details (key=value)
       labels:

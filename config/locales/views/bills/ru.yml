@@ -91,6 +91,7 @@ ru:
         few: '%{count} платежа не учтены: нет обменного курса'
         many: '%{count} платежей не учтено: нет обменного курса'
         other: '%{count} платежа не учтены: нет обменного курса'
+      pulse_until: "до %{date}"
     summary:
       remaining: Осталось %{amount}
       paid_headline: Оплачено %{amount}

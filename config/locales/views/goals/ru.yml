@@ -59,9 +59,9 @@ ru:
       save: Сохранить изменения
       subtypes:
         cd: Срочный вклад
-        checking: Расчётный счёт
+        checking: Текущий счёт
         hsa: Медицинский сберегательный счёт
-        money_market: Накопительный счёт
+        money_market: Счёт денежного рынка
         other: Другое
         savings: Сберегательный счёт
       suggested_no_date: Укажите дату, чтобы рассчитать срок достижения.
@@ -132,6 +132,8 @@ ru:
       footer_reserve_intact: Резерв в норме
       footer_reserve_short: Пополнить на %{amount}
       partial_total: 'Некоторые остатки не учтены: пока нет курса обмена.'
+      pace_unknown_with_target: "Темп неизвестен · цель %{target}/мес."
+      pace_unknown: "Темп неизвестен"
     index:
       archived_section:
         heading: Архив
@@ -179,6 +181,11 @@ ru:
             few: "%{count} достигнуты"
             many: "%{count} достигнуты"
             other: "%{count} достигнуты"
+          pace_unknown:
+            one: "1 с неизвестным темпом"
+            other: "%{count} с неизвестным темпом"
+            few: "%{count} с неизвестным темпом"
+            many: "%{count} с неизвестным темпом"
         on_track_value: "%{on_track} из %{total}"
         velocity_delta_down: "↓ %{percent}%% к предыдущим 30 дн."
         velocity_delta_flat: к предыдущим 30 дн.
@@ -300,6 +307,7 @@ ru:
         no_target_date: укажите дату
         on_track: 'цель будет достигнута около %{date}'
         depleted: на %{amount} ниже целевого баланса — пополните, чтобы восстановить резерв
+        pace_unknown: "Пока нельзя определить темп по этим счетам: за последний год нужно хотя бы одно обновление баланса и история балансов за год."
       unarchive: Восстановить
       consume: Я потратил часть этих денег
       reserve_shortfall:
@@ -338,6 +346,7 @@ ru:
         tooltip_projected: 'Прогноз: %{amount}'
         tooltip_saved: 'Накоплено: %{amount}'
         tooltip_target_relation: '%{percent}% от цели %{target}'
+        pace_unknown: "Пока недостаточно истории по этим счетам, чтобы определить темп, поэтому прогноз недоступен."
     states:
       active: Активна
       archived: В архиве
@@ -353,6 +362,7 @@ ru:
       reached: Достигнута
       funded: Резерв в норме
       depleted: Нужно пополнить
+      pace_unknown: "Темп неизвестен"
     unarchive:
       invalid_transition: Нельзя восстановить цель в текущем состоянии.
       success: Цель восстановлена.

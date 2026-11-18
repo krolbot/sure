@@ -189,6 +189,7 @@ ru:
         overview: Обзор
         statements: Выписки
         schedule: График платежей
+        extra_repayments: "Дополнительные платежи"
     sidebar:
       configure_providers: Настройте ваших провайдеров здесь.
       missing_data: Отсутствуют исторические данные
@@ -259,6 +260,14 @@ ru:
     update:
       success: Счёт %{type} обновлён
       logo_not_applied: Счёт сохранён, но выбранную иконку скачать не удалось. Попробуйте ещё раз или загрузите свою.
+    reconciliation_indicator:
+      matched: "Все операции сверены"
+      needs_attention: "Операции требуют сверки"
+    scheduled_balance_tooltip:
+      description: "Ваш баланс после проведения всех запланированных операций"
+      current: "Текущий баланс"
+      scheduled: "Запланировано"
+      projected: "Прогнозируемый баланс"
   email_confirmations:
     new:
       invalid_token: Неверная или истекшая ссылка подтверждения.

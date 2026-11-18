@@ -161,7 +161,7 @@
                   <% end %>
                 </td>
                 <td class="px-4 py-3 text-sm font-medium text-primary text-right whitespace-nowrap">
-                  <%= usage.formatted_cost %>
+                  <%= usage.estimated_cost.nil? ? t(".not_available") : number_to_currency(usage.estimated_cost, unit: "USD", precision: 4) %>
                 </td>
               </tr>
             <% end %>

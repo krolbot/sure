@@ -140,7 +140,7 @@ ru:
       status_with_summary: Последняя синхронизация %{timestamp} назад — %{summary}
       delete: Отключить
       setup_needed: Новые счета готовы к настройке
-      setup_description: 'Связано %{linked} из %{total} счетов. Создайте счета Sure для валютных балансов Wise.'
+      setup_description: 'Связано: %{linked} из %{total}. Создайте счета Sure для валютных балансов Wise.'
       setup_action: Настроить счета
       no_accounts_title: Связанных счетов пока нет
       no_accounts_description: Запустите синхронизацию, чтобы найти балансы Wise, затем свяжите их со счетами Sure.
@@ -165,6 +165,7 @@ ru:
       no_accounts_found: Несвязанные балансы Wise не найдены.
       link_account: Связать баланс
       cancel: Отмена
+      not_found: "Счёт или баланс Wise не найден."
     link_accounts:
       not_found: Баланс Wise не найден.
       success: Баланс Wise успешно связан со счётом.
