@@ -16,6 +16,27 @@ ru:
         mfa_enabled_status_html: Двухфакторная аутентификация <span class="font-medium
           text-success">включена</span>
         mfa_sso_only: Двухфакторная аутентификация управляется вашим провайдером единого входа.
+        encryption_warning:
+          generate: 'Сгенерируйте набор ключей командой: bin/rails db:encryption:init'
+          intro: 'Конфиденциальные данные (API-ключи, токены провайдеров, MFA-секреты и персональные данные) хранятся без шифрования. Чтобы включить шифрование, задайте следующие ключи в переменных окружения или в Rails credentials:'
+          keys:
+            - ACTIVE_RECORD_ENCRYPTION_PRIMARY_KEY
+            - ACTIVE_RECORD_ENCRYPTION_DETERMINISTIC_KEY
+            - ACTIVE_RECORD_ENCRYPTION_KEY_DERIVATION_SALT
+          title: Отсутствуют ключи шифрования
+        page_title: Безопасность
+        sso_confirm_body: Отключить вход через %{provider}? Позже его можно будет подключить снова, войдя через этого провайдера.
+        sso_confirm_button: Отключить
+        sso_confirm_title: Отключить вход?
+        sso_connect_hint: Выйдите из аккаунта, затем войдите через провайдера единого входа, чтобы подключить его.
+        sso_disconnect: Отключить
+        sso_last_used: Последний вход
+        sso_never: Никогда
+        sso_no_email: Адрес электронной почты не указан
+        sso_no_identities: Нет подключённых способов входа
+        sso_subtitle: Управляйте способами входа через единый вход
+        sso_title: Единый вход
+        sso_warning_message: Это единственный способ входа в аккаунт. Перед отключением задайте пароль в настройках безопасности, иначе можете потерять доступ к аккаунту.
         mfa_title: Двухфакторная аутентификация
         webauthn_add: Добавить ключ доступа или ключ безопасности
         webauthn_added: Добавлено %{date}

@@ -31,14 +31,14 @@ ru:
       step1: Перейдите в Настройки → API-ключи
       step2: Создайте новый API-ключ с разрешением "чтение"
       step3: Скопируйте API-ключ
-      step4: 'Добавьте его в этот URL как: ?api_key=YOUR_KEY'
+      step4: 'Добавьте его в этот URL как: &api_key=YOUR_KEY'
       steps: |-
         Чтобы импортировать в Google Sheets:
         1. Создайте новый Google Sheet
         2. В ячейке A1 введите формулу, показанную ниже
         3. Нажмите Enter
       then_use: Затем используйте полный URL с =IMPORTDATA() в Google Sheets.
-      title_no_key: "⚠️ Требуется API-ключ"
+      title_no_key: Требуется API-ключ
       title_with_key: "✅ Скопируйте URL для Google Sheets"
     index:
       date_range:

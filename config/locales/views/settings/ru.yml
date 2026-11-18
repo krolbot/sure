@@ -1,6 +1,7 @@
 ---
 ru:
   settings:
+    encryption_migration_guide: Руководство по настройке шифрования и миграции
     ai_prompts:
       show:
         disable_ai: 'Отключить ИИ-ассистента'
@@ -321,6 +322,7 @@ ru:
           Asia/Jerusalem: Иерусалим
           Europe/Kaliningrad: Калининград
           Europe/Kiev: Киев
+          Europe/Kyiv: Киев
           Africa/Johannesburg: Йоханнесбург
           Europe/Riga: Рига
           Europe/Sofia: София
@@ -351,6 +353,7 @@ ru:
           Asia/Dhaka: Дакка
           Asia/Urumqi: Урумчи
           Asia/Rangoon: Янгон
+          Asia/Yangon: Янгон
           Asia/Bangkok: Бангкок
           Asia/Jakarta: Джакарта
           Asia/Krasnoyarsk: Красноярск

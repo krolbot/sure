@@ -3,6 +3,7 @@ ru:
   invitations:
     accept_choice:
       create_account: Создать новый аккаунт
+      existing_account_hint: "Уже есть учетная запись? Существующие учетные записи не могут присоединиться к другому домохозяйству по приглашению."
       joined_household: Вы присоединились к семье.
       message: '%{inviter} приглашает вас присоединиться в роли %{role}.'
       sign_in_existing: У меня уже есть аккаунт
