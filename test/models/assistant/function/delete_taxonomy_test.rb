@@ -51,6 +51,19 @@ class Assistant::Function::DeleteTaxonomyTest < ActiveSupport::TestCase
     assert_not_includes transaction.tags, old_tag
   end
 
+  test "rejects a blank tag replacement without deleting taggings" do
+    transaction = transactions(:one)
+    tag = @family.tags.create!(name: "Protected MCP tag", color: "#e99537")
+    transaction.tags << tag
+
+    result = Assistant::Function::DeleteTag.new(@user).call("id" => tag.id, "replacement_tag_id" => "")
+
+    assert_equal false, result[:success]
+    assert_equal "invalid_replacement", result[:error]
+    assert Tag.exists?(tag.id)
+    assert_includes transaction.tags.reload, tag
+  end
+
   test "does not delete another family's taxonomy" do
     other_family = families(:empty)
     tag = other_family.tags.create!(name: "Foreign tag", color: "#e99537")
@@ -63,5 +76,23 @@ class Assistant::Function::DeleteTaxonomyTest < ActiveSupport::TestCase
     assert_equal "not_found", category_result[:error]
     assert Tag.exists?(tag.id)
     assert Category.exists?(category.id)
+  end
+
+  test "direct guest calls preserve taxonomy and its transaction associations" do
+    transaction = transactions(:one)
+    category = @family.categories.create!(name: "Guest-protected category", color: "#e99537", lucide_icon: "tag")
+    tag = @family.tags.create!(name: "Guest-protected tag", color: "#e99537")
+    transaction.update!(category: category)
+    transaction.tags << tag
+    original_tag_ids = transaction.tag_ids.sort
+    guest = users(:family_member)
+    guest.update!(role: "guest")
+
+    assert_no_difference [ "Category.count", "Tag.count" ] do
+      assert_equal "not_authorized", Assistant::Function::DeleteCategory.new(guest).call("id" => category.id)[:error]
+      assert_equal "not_authorized", Assistant::Function::DeleteTag.new(guest).call("id" => tag.id)[:error]
+    end
+    assert_equal category.id, transaction.reload.category_id
+    assert_equal original_tag_ids, transaction.tag_ids.sort
   end
 end

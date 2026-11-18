@@ -34,6 +34,8 @@ class Assistant::Function::DeleteCategory < Assistant::Function
   end
 
   def call(params = {})
+    return error("not_authorized", "Guests cannot delete categories.") if user.guest?
+
     category_id = valid_uuid?(params["id"]) ? params["id"].to_s : nil
     return error("not_found", "Category not found.") unless category_id
 

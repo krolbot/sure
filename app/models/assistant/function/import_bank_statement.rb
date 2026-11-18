@@ -2,7 +2,6 @@ require "csv"
 
 class Assistant::Function::ImportBankStatement < Assistant::Function
   self.ai_feature = :extract_pdf
-
   class << self
     def name
       "import_bank_statement"
@@ -101,12 +100,13 @@ class Assistant::Function::ImportBankStatement < Assistant::Function
     availability = Ai.availability(:extract_pdf, family:, user:)
     return ai_unavailable(availability) unless availability.available?
 
-    # The first provider in extract_pdf's route. Settings can clear the last key between the
-    # availability check and this lookup, so a missing provider is the same refusal
-    # (PdfImport::AiProcessor#route_provider refuses the same way).
+    # Settings can clear the last route key after the availability check.
     provider = Provider::Registry.preferred_llm_provider
     return ai_unavailable(Ai::Availability.unavailable(:extract_pdf, :not_configured)) unless provider
 
+    # Extract transactions from the PDF using the configured LLM provider.
+    # Honors Setting.llm_provider (issue #2113) — Provider::Anthropic implements
+    # extract_bank_statement (PR #1985).
     response = provider.extract_bank_statement(
       pdf_content: pdf_import.pdf_file_content,
       model: model_for(provider),

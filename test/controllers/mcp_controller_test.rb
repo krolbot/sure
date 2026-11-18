@@ -445,9 +445,11 @@ class McpControllerTest < ActionDispatch::IntegrationTest
         update_budget
       ]
       assert_empty expected_action_tools - tool_names
-      assert_equal 45, tools.size
+      assert_equal tool_names.uniq, tool_names
       assert_includes Assistant.mcp_function_classes(@user), Assistant::Function::DeleteTransaction
-      assert_not_includes Assistant.function_classes, Assistant::Function::DeleteTransaction
+      assert_includes Assistant.function_classes, Assistant::Function::DeleteTransaction
+      assert_includes Assistant.function_classes, Assistant::Function::DeleteCategory
+      assert_not_includes Assistant.function_classes, Assistant::Function::DeleteTag
 
       # Each tool has required fields
       tools.each do |tool|
@@ -479,6 +481,37 @@ class McpControllerTest < ActionDispatch::IntegrationTest
       assert_equal expected_preview.sort, (preview_names - baseline_names).sort
       assert_equal preview_names.size, preview_names.uniq.size
     end
+  end
+
+  test "guest discovery and guessed taxonomy deletions preserve existing associations" do
+    transaction = transactions(:one)
+    category = transaction.category
+    tag = tags(:one)
+    transaction.tags << tag unless transaction.tags.include?(tag)
+    original_tag_ids = transaction.tag_ids.sort
+    @user = users(:family_member)
+    @user.update!(role: "guest")
+
+    with_mcp_env do
+      post "/mcp", params: jsonrpc_request("tools/list").to_json, headers: mcp_headers(@token)
+      assert_response :ok
+      names = JSON.parse(response.body).fetch("result").fetch("tools").pluck("name")
+      assert_includes names, "get_categories"
+      assert_includes names, "get_tags"
+      assert_not_includes names, "delete_category"
+      assert_not_includes names, "delete_tag"
+
+      assert_no_difference [ "Category.count", "Tag.count", "Transaction.count" ] do
+        { "delete_category" => category.id, "delete_tag" => tag.id }.each do |name, id|
+          post "/mcp", params: jsonrpc_request("tools/call", { name:, arguments: { id: } }).to_json,
+               headers: mcp_headers(@token)
+          assert_response :ok
+          assert_equal(-32602, JSON.parse(response.body).dig("error", "code"))
+        end
+      end
+    end
+    assert_equal category.id, transaction.reload.category_id
+    assert_equal original_tag_ids, transaction.tag_ids.sort
   end
 
   test "tools/call returns discoverable account subtype values" do

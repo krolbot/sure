@@ -175,8 +175,42 @@ At the time of writing, `tools/list` includes:
 
 `get_accounts`, `get_goals`, `get_tags`, `get_transfers`, and the other list tools return the stable IDs required by follow-up actions. `get_accounts` includes each account's current type, subtype, permission, and `goal_funding` status. Goal create/update calls use one complete `funding_accounts` list; every item identifies an account ID and chooses either `whole_account` or `fixed_amount`. Call `get_account_types` before `create_account` to discover valid subtype values. In `get_accounts`, `writable` means the account can be used for account-level and balance-affecting write tools; `transaction_editing.annotations` separately reports whether the user can update transaction notes, categories, merchants, or tags on that account. Creation tools that accept an `external_id` require the caller to reuse the same key when retrying an operation.
 
-Destructive MCP-only tools are not automatically exposed to Sure's built-in
-assistant.
+The new `delete_account`, `delete_transfer`, `delete_goal`, and `delete_tag` tools
+are MCP-only. The existing `delete_transaction` and `delete_category` tools remain
+available to the built-in assistant. Guests cannot discover or invoke family
+category/tag mutations; the deletion functions also reject direct guest calls.
+
+### Transaction creation and deletion contracts
+
+`create_transaction` preserves the existing signed-amount contract: `account_id`,
+`date`, `amount`, and `name` are required. A negative amount is income; optional
+`type` (`income`, `expense`, `inflow`, or `outflow`) derives the sign from its
+magnitude. `external_id` remains optional for these callers, but a call without
+one is not safe to retry automatically.
+
+The magnitude-based contract accepts `nature: income/expense`, a strictly positive
+`amount`, and a required stable `external_id`. Both contracts honor explicit
+`currency`, `source`, and `user_modified`. Currency defaults to the account's;
+source defaults to `mcp` and must be paired with an external ID. Provider-sync
+protection defaults to true with `nature` and false with the signed/type contract.
+Contradictory `type`/`nature` values are rejected without a write.
+
+Responses retain the existing signed string amount for signed/type requests and
+the absolute amount plus `nature` for magnitude requests. Both include transaction,
+entry and account IDs. Reusing a `(source, external_id)` pair anywhere in the
+family is accepted only for the same canonical creation request, including its
+account, currency, direction, annotations and provider-sync protection.
+
+`delete_transaction` retains optional `account_id` as a safety guard. A mismatch
+or malformed guard cannot delete anything; split and linked-transfer transactions
+require their dedicated workflows. `delete_category` accepts upstream's
+`replacement_id` and the existing `replacement_category_id` alias, rejecting
+conflicting replacements.
+
+`delete_transfer` uses the same unlink operation as `unmatch_transfer` with
+`reject: false`: it preserves the two principal transactions but permanently
+deletes associated fees. Its response lists `deleted_fee_transactions` and
+`remaining_transaction_ids`. Confirm the fee deletion before invoking it.
 
 ### Preview Tools
 

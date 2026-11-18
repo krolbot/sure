@@ -84,6 +84,7 @@ module Assistant
         Function::GetCategories,
         Function::CreateCategory,
         Function::UpdateCategory,
+        Function::DeleteCategory,
         Function::GetMerchants,
         Function::GetRules,
         Function::GetRuleOptions,
@@ -93,6 +94,7 @@ module Assistant
         Function::ApplyRule,
         Function::CreateTransaction,
         Function::UpdateTransaction,
+        Function::DeleteTransaction,
         Function::GetTransferMatchCandidates,
         Function::MatchTransfer,
         Function::ReviewTransfer,
@@ -112,15 +114,13 @@ module Assistant
         Function::CreateAccount,
         Function::UpdateAccount,
         Function::DeleteAccount,
-        Function::DeleteTransaction,
         Function::CreateTransfer,
         Function::DeleteTransfer,
         Function::UpdateGoal,
         Function::DeleteGoal,
-        Function::DeleteTag,
-        Function::DeleteCategory
+        Function::DeleteTag
       ]
-      classes -= FAMILY_CONFIG_FUNCTION_CLASSES if user&.guest?
+      classes.delete(Function::DeleteTag) if user&.guest?
       classes
     end
 

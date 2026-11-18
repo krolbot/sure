@@ -11,6 +11,10 @@ ru:
         of_the_following_conditions: из следующих условий
       condition:
         value_placeholder: Введите значение
+    category_rule_cta:
+      dont_show_again: Больше не показывать
+      hide_for_today: Не сегодня
+      hide_for_today_hint: Скрыть предложения правил до завтра
   rules:
     back_to_rules: К правилам
     all_rules: все правила
